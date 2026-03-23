@@ -6,6 +6,8 @@
   },
   "auth": [
     [],
+    [],
+    [],
     [
       [
         "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
@@ -13,22 +15,16 @@
           "function": {
             "contract_fn": {
               "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "function_name": "create_subscription",
+              "function_name": "append_log_entry",
               "args": [
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                  "u64": "99"
                 },
                 {
-                  "string": "netflix"
+                  "string": "Renewed"
                 },
                 {
-                  "u64": "2592000"
-                },
-                {
-                  "i128": "1599"
-                },
-                {
-                  "u64": "1735689600"
+                  "string": "Success"
                 }
               ]
             }
@@ -44,21 +40,16 @@
           "function": {
             "contract_fn": {
               "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "function_name": "update_subscription",
+              "function_name": "append_log_entry",
               "args": [
                 {
-                  "bytes": "0000000000000000eddee25b9bede2faaf5f05d12f000a0c5107f7ff137a2632"
+                  "u64": "99"
                 },
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
-                },
-                "void",
-                "void",
-                {
-                  "i128": "1799"
+                  "string": "Failed"
                 },
                 {
-                  "u64": "1738281600"
+                  "string": "Card declined"
                 }
               ]
             }
@@ -79,6 +70,108 @@
     "min_temp_entry_ttl": 16,
     "max_entry_ttl": 6312000,
     "ledger_entries": [
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "SubscriptionLogs"
+                },
+                {
+                  "u64": "99"
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "SubscriptionLogs"
+                    },
+                    {
+                      "u64": "99"
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "vec": [
+                    {
+                      "map": [
+                        {
+                          "key": {
+                            "symbol": "action"
+                          },
+                          "val": {
+                            "string": "Renewed"
+                          }
+                        },
+                        {
+                          "key": {
+                            "symbol": "details"
+                          },
+                          "val": {
+                            "string": "Success"
+                          }
+                        },
+                        {
+                          "key": {
+                            "symbol": "timestamp"
+                          },
+                          "val": {
+                            "u64": "0"
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "map": [
+                        {
+                          "key": {
+                            "symbol": "action"
+                          },
+                          "val": {
+                            "string": "Failed"
+                          }
+                        },
+                        {
+                          "key": {
+                            "symbol": "details"
+                          },
+                          "val": {
+                            "string": "Card declined"
+                          }
+                        },
+                        {
+                          "key": {
+                            "symbol": "timestamp"
+                          },
+                          "val": {
+                            "u64": "0"
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          4095
+        ]
+      ],
       [
         {
           "contract_data": {
@@ -106,87 +199,12 @@
                         "key": {
                           "vec": [
                             {
-                              "symbol": "Subscription"
-                            },
-                            {
-                              "bytes": "0000000000000000eddee25b9bede2faaf5f05d12f000a0c5107f7ff137a2632"
+                              "symbol": "Admin"
                             }
                           ]
                         },
                         "val": {
-                          "map": [
-                            {
-                              "key": {
-                                "symbol": "billing_interval"
-                              },
-                              "val": {
-                                "u64": "2592000"
-                              }
-                            },
-                            {
-                              "key": {
-                                "symbol": "expected_amount"
-                              },
-                              "val": {
-                                "i128": "1799"
-                              }
-                            },
-                            {
-                              "key": {
-                                "symbol": "is_active"
-                              },
-                              "val": {
-                                "bool": true
-                              }
-                            },
-                            {
-                              "key": {
-                                "symbol": "next_renewal"
-                              },
-                              "val": {
-                                "u64": "1738281600"
-                              }
-                            },
-                            {
-                              "key": {
-                                "symbol": "service_id"
-                              },
-                              "val": {
-                                "string": "netflix"
-                              }
-                            }
-                          ]
-                        }
-                      },
-                      {
-                        "key": {
-                          "vec": [
-                            {
-                              "symbol": "SubscriptionCounter"
-                            }
-                          ]
-                        },
-                        "val": {
-                          "u64": "1"
-                        }
-                      },
-                      {
-                        "key": {
-                          "vec": [
-                            {
-                              "symbol": "UserSubscriptions"
-                            },
-                            {
-                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
-                            }
-                          ]
-                        },
-                        "val": {
-                          "vec": [
-                            {
-                              "bytes": "0000000000000000eddee25b9bede2faaf5f05d12f000a0c5107f7ff137a2632"
-                            }
-                          ]
+                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                         }
                       }
                     ]
