@@ -6,7 +6,8 @@
     "build": "next build",
     "dev": "next dev",
     "lint": "eslint .",
-    "start": "next start"
+    "start": "next start",
+    "validate-env": "node scripts/validate-env.js"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
