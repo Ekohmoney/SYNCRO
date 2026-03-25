@@ -1,10 +1,12 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Edit2, Trash2, Mail, Clock, Copy } from "lucide-react"
+import { Edit2, Trash2, Mail, Clock, Copy, ShieldAlert, CheckCircle } from "lucide-react"
 import { useDebounce } from "@/hooks/use-debounce"
 import { VirtualizedList } from "@/components/ui/virtualized-list"
 import { EmptyState } from "@/components/ui/empty-state"
+import CancellationGuideModal from "@/components/modals/cancellation-guide-modal"
+import { fetchAllCancellationGuides, type CancellationGuide } from "@/lib/supabase/cancellation-guides"
 
 interface SubscriptionsPageProps {
   subscriptions?: any[]
@@ -44,6 +46,20 @@ export default function SubscriptionsPage({
   const [sortBy, setSortBy] = useState("name")
   const [showDuplicatesOnly, setShowDuplicatesOnly] = useState(false)
   const [showUnusedOnly, setShowUnusedOnly] = useState(false)
+  const [guides, setGuides] = useState<CancellationGuide[]>([])
+  const [selectedSubForCancel, setSelectedSubForCancel] = useState<any | null>(null)
+
+  useEffect(() => {
+    async function loadGuides() {
+      try {
+        const data = await fetchAllCancellationGuides()
+        setGuides(data)
+      } catch (error) {
+        console.error("Failed to load all cancellation guides:", error)
+      }
+    }
+    loadGuides()
+  }, [])
 
   const emailAccountsList = ["all", ...new Set((subscriptions || []).map((s: any) => s.email).filter(Boolean))]
   const categories = ["all", ...new Set((subscriptions || []).map((s: any) => s.category))]
@@ -321,11 +337,28 @@ export default function SubscriptionsPage({
                   darkMode={darkMode}
                   isDuplicate={duplicates.some((dup: any) => dup.subscriptions.some((s: any) => s.id === sub.id))}
                   unusedInfo={unusedSubscriptions.find((unused: any) => unused.id === sub.id)}
+                  onCancel={(s) => setSelectedSubForCancel(s)}
+                  guide={guides.find((g) => g.service_name.toLowerCase() === sub.name.toLowerCase())}
                 />
               ))}
             </div>
           )}
         </>
+      )}
+
+      {selectedSubForCancel && (
+        <CancellationGuideModal
+          subscription={selectedSubForCancel}
+          darkMode={darkMode}
+          onClose={() => setSelectedSubForCancel(null)}
+          onCancelled={() => {
+            // In a real app, you would refresh the subscription list here
+            // For now, we'll just show a success toast or manually update the local state if possible
+            // But since subscriptions props are passed down, the parent should handle it.
+            // For the sake of this demo, we'll just close it.
+            setSelectedSubForCancel(null)
+          }}
+        />
       )}
 
       {hasNoResults && (
@@ -360,6 +393,8 @@ interface SubscriptionCardProps {
   darkMode?: boolean
   isDuplicate?: boolean
   unusedInfo?: any
+  onCancel?: (subscription: any) => void
+  guide?: CancellationGuide
 }
 
 function SubscriptionCard({
@@ -371,13 +406,23 @@ function SubscriptionCard({
   darkMode,
   isDuplicate,
   unusedInfo,
+  onCancel,
+  guide,
 }: SubscriptionCardProps) {
   const statusLabel =
     sub.status === "expiring"
       ? `expiring in ${sub.renewsIn} days`
       : sub.status === "trial"
         ? "trial"
-        : "active"
+        : sub.status === "cancelled"
+          ? "cancelled"
+          : "active"
+
+  const difficultyColors = {
+    easy: "text-green-500 bg-green-500/10",
+    medium: "text-yellow-500 bg-yellow-500/10",
+    hard: "text-red-500 bg-red-500/10",
+  }
 
   return (
     <div
@@ -434,6 +479,19 @@ function SubscriptionCard({
               </>
             )}
           </div>
+          <div className="flex items-center gap-2 mt-1">
+            {guide && (
+              <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${difficultyColors[guide.difficulty]}`}>
+                {guide.difficulty} to cancel
+              </span>
+            )}
+             {sub.status === "cancelled" && (
+              <span className="bg-gray-100 dark:bg-[#1E2A35] text-gray-500 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full flex items-center gap-1">
+                <CheckCircle className="w-2.5 h-2.5" />
+                Cancelled
+              </span>
+            )}
+          </div>
           {sub.isTrial && sub.trialEndsAt && (
             <p className={`text-xs ${darkMode ? "text-[#007A5C]" : "text-green-600"} mt-1`}>
               Trial ends in {Math.ceil((new Date(sub.trialEndsAt).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))} days - $
@@ -466,6 +524,16 @@ function SubscriptionCard({
           >
             <Edit2 aria-hidden="true" className="w-4 h-4" />
           </button>
+          {sub.status !== "cancelled" && (
+            <button
+              onClick={() => onCancel && onCancel(sub)}
+              aria-label={`Cancel ${sub.name}`}
+              className={`p-2 rounded-lg ${darkMode ? "hover:bg-red-500/20 text-red-500" : "hover:bg-red-50 text-red-600"} flex items-center gap-1 group`}
+            >
+              <ShieldAlert aria-hidden="true" className="w-4 h-4" />
+              <span className="text-xs font-semibold hidden group-hover:inline">Cancel</span>
+            </button>
+          )}
           <button
             onClick={() => onDelete(sub.id)}
             aria-label={`Delete ${sub.name}`}
