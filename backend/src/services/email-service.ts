@@ -261,6 +261,24 @@ This is an automated reminder from Synchro.
   }
 
   /**
+   * Send a simple plain-text / HTML email.
+   * Returns a resolved promise on success; rejects on failure.
+   */
+  async sendSimpleEmail(to: string, subject: string, text: string): Promise<void> {
+    if (!this.transporter) {
+      throw new Error('Email transporter not configured');
+    }
+    await this.transporter.sendMail({
+      from: this.fromEmail,
+      to,
+      subject,
+      text,
+      html: `<p>${text}</p>`,
+    });
+    logger.info(`Simple email sent to ${to}`, { subject });
+  }
+
+  /**
    * Send a team invitation email
    */
   async sendInvitationEmail(

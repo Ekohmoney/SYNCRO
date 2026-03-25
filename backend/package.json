@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.47.10",
+    "bcryptjs": "^2.4.3",
     "@types/cookie-parser": "^1.4.10",
     "cookie-parser": "^1.4.7",
     "dotenv": "^16.4.5",
@@ -27,6 +28,7 @@
   },
   "devDependencies": {
     "@stellar/stellar-sdk": "^14.5.0",
+    "@types/bcryptjs": "^2.4.6",
     "@types/express": "^5.0.0",
     "@types/jest": "^30.0.0",
     "@types/node": "^20.14.0",

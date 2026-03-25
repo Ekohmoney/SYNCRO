@@ -12,6 +12,7 @@ import riskScoreRoutes from './routes/risk-score';
 import simulationRoutes from './routes/simulation';
 import merchantRoutes from './routes/merchants';
 import teamRoutes from './routes/team';
+import mfaRoutes from './routes/mfa';
 import { monitoringService } from './services/monitoring-service';
 import { healthService } from './services/health-service';
 import { eventListener } from './services/event-listener';
@@ -26,7 +27,7 @@ const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', FRONTEND_URL);
   res.header('Access-Control-Allow-Credentials', 'true');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Idempotency-Key, If-Match');
 
   if (req.method === 'OPTIONS') {
@@ -53,6 +54,7 @@ app.use('/api/risk-score', riskScoreRoutes);
 app.use('/api/simulation', simulationRoutes);
 app.use('/api/merchants', merchantRoutes);
 app.use('/api/team', teamRoutes);
+app.use('/api', mfaRoutes);
 
 // API Routes (Public/Standard)
 app.get('/api/reminders/status', (req, res) => {
