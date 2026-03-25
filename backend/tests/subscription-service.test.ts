@@ -27,6 +27,14 @@ jest.mock('../src/services/blockchain-service', () => ({
   },
 }));
 
+// Mock renewal cooldown service
+jest.mock('../src/services/renewal-cooldown-service', () => ({
+  renewalCooldownService: {
+    checkCooldown: jest.fn().mockResolvedValue({ isOnCooldown: false, canRetry: true, timeRemainingSeconds: 0, lastAttemptAt: null }),
+    recordRenewalAttempt: jest.fn().mockResolvedValue({ new_attempt_at: new Date().toISOString() }),
+  },
+}));
+
 // Mock DatabaseTransaction
 jest.mock('../src/utils/transaction', () => ({
   DatabaseTransaction: {
@@ -631,15 +639,16 @@ describe('SubscriptionService', () => {
         { id: 'sub-1', name: 'Netflix', status: 'active' },
       ];
 
-      const mockQuery = {
+      const mockQuery: any = {
         select: jest.fn().mockReturnThis(),
         eq: jest.fn().mockReturnThis(),
-        order: jest.fn().mockResolvedValue({
+        order: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        then: jest.fn().mockImplementation((resolve: any) => resolve({
           data: mockSubscriptions,
           error: null,
           count: 1,
-        }),
-        limit: jest.fn().mockReturnThis(),
+        })),
       };
 
       (supabase.from as jest.Mock).mockReturnValue(mockQuery);
@@ -656,15 +665,16 @@ describe('SubscriptionService', () => {
         { id: 'sub-1', name: 'Netflix', category: 'entertainment' },
       ];
 
-      const mockQuery = {
+      const mockQuery: any = {
         select: jest.fn().mockReturnThis(),
         eq: jest.fn().mockReturnThis(),
-        order: jest.fn().mockResolvedValue({
+        order: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        then: jest.fn().mockImplementation((resolve: any) => resolve({
           data: mockSubscriptions,
           error: null,
           count: 1,
-        }),
-        limit: jest.fn().mockReturnThis(),
+        })),
       };
 
       (supabase.from as jest.Mock).mockReturnValue(mockQuery);
@@ -757,6 +767,8 @@ describe('SubscriptionService', () => {
           data: mockSubscription,
           error: null,
         }),
+        update: jest.fn().mockReturnThis(),
+        insert: jest.fn().mockResolvedValue({ data: null, error: null }),
       };
 
       (supabase.from as jest.Mock).mockReturnValue(mockQuery);
@@ -796,6 +808,8 @@ describe('SubscriptionService', () => {
           data: mockSubscription,
           error: null,
         }),
+        update: jest.fn().mockReturnThis(),
+        insert: jest.fn().mockResolvedValue({ data: null, error: null }),
       };
 
       (supabase.from as jest.Mock).mockReturnValue(mockQuery);
@@ -828,7 +842,7 @@ describe('SubscriptionService', () => {
 
       await expect(
         subscriptionService.retryBlockchainSync('user-123', 'non-existent')
-      ).rejects.toThrow('Subscription not found');
+      ).rejects.toThrow('Subscription not found or access denied');
     });
   });
 });

@@ -40,6 +40,7 @@ describe('SimulationService', () => {
         id: '1',
         user_id: 'user1',
         email_account_id: null,
+        merchant_id: null,
         name: 'Netflix',
         provider: 'Netflix',
         price: 15.99,
@@ -52,6 +53,7 @@ describe('SimulationService', () => {
         renewal_url: null,
         notes: null,
         tags: [],
+        expired_at: null,
         created_at: '2024-01-01',
         updated_at: '2024-01-01',
       };
@@ -67,6 +69,7 @@ describe('SimulationService', () => {
         id: '1',
         user_id: 'user1',
         email_account_id: null,
+        merchant_id: null,
         name: 'Netflix',
         provider: 'Netflix',
         price: 15.99,
@@ -79,6 +82,7 @@ describe('SimulationService', () => {
         renewal_url: null,
         notes: null,
         tags: [],
+        expired_at: null,
         created_at: '2024-01-01',
         updated_at: '2024-01-01',
       };
@@ -98,6 +102,7 @@ describe('SimulationService', () => {
         id: '1',
         user_id: 'user1',
         email_account_id: null,
+        merchant_id: null,
         name: 'Netflix',
         provider: 'Netflix',
         price: 15.99,
@@ -110,6 +115,7 @@ describe('SimulationService', () => {
         renewal_url: null,
         notes: null,
         tags: [],
+        expired_at: null,
         created_at: '2024-01-01',
         updated_at: '2024-01-01',
       };
@@ -127,6 +133,7 @@ describe('SimulationService', () => {
         id: '1',
         user_id: 'user1',
         email_account_id: null,
+        merchant_id: null,
         name: 'Netflix',
         provider: 'Netflix',
         price: 15.99,
@@ -139,6 +146,7 @@ describe('SimulationService', () => {
         renewal_url: null,
         notes: null,
         tags: [],
+        expired_at: null,
         created_at: '2024-01-01',
         updated_at: '2024-01-01',
       };
