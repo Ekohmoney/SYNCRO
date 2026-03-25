@@ -110,6 +110,30 @@ router.get("/:id", validateSubscriptionOwnership, async (req: AuthenticatedReque
 });
 
 /**
+ * GET /api/subscriptions/:id/price-history
+ * Get price history for a subscription
+ */
+router.get("/:id/price-history", validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const history = await subscriptionService.getPriceHistory(
+      req.user!.id,
+      Array.isArray(req.params.id) ? req.params.id[0] : req.params.id
+    );
+
+    res.json({
+      success: true,
+      data: history,
+    });
+  } catch (error) {
+    logger.error("Get price history error:", error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to get price history",
+    });
+  }
+});
+
+/**
  * POST /api/subscriptions
  * Create new subscription with idempotency support
  */

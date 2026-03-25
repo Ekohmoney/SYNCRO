@@ -390,6 +390,15 @@ function SubscriptionCard({
                 Unused {unusedInfo.daysSinceLastUse}d
               </span>
             )}
+            {sub.latest_price_change && (
+              <span className={`text-xs px-2 py-0.5 rounded-full font-semibold flex items-center gap-1 ${
+                sub.latest_price_change.new_price > sub.latest_price_change.old_price 
+                  ? "bg-red-100 text-red-700" 
+                  : "bg-green-100 text-green-700"
+              }`}>
+                {sub.latest_price_change.new_price > sub.latest_price_change.old_price ? "↑" : "↓"} Price Changed
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <p className={`text-xs ${darkMode ? "text-gray-400" : "text-gray-500"}`}>{sub.category}</p>

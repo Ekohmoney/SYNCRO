@@ -327,8 +327,25 @@ export class SubscriptionService {
       throw new Error(`Failed to fetch subscriptions: ${error.message}`);
     }
 
+    // Fetch latest price change for each subscription
+    const enhancedSubscriptions = await Promise.all(
+      (subscriptions || []).map(async (sub) => {
+        const { data: priceHistory } = await supabase
+          .from("subscription_price_history")
+          .select("*")
+          .eq("subscription_id", sub.id)
+          .order("changed_at", { ascending: false })
+          .limit(1);
+
+        return {
+          ...sub,
+          latest_price_change: priceHistory && priceHistory.length > 0 ? priceHistory[0] : null,
+        };
+      })
+    );
+
     return {
-      subscriptions: subscriptions || [],
+      subscriptions: enhancedSubscriptions,
       total: count || 0,
     };
   }
@@ -441,6 +458,28 @@ export class SubscriptionService {
       logger.error("Renewal retry failed:", error);
       throw error;
     }
+  }
+
+  /**
+   * Get price history for a subscription
+   */
+  async getPriceHistory(
+    userId: string,
+    subscriptionId: string
+  ): Promise<any[]> {
+    const { data, error } = await supabase
+      .from("subscription_price_history")
+      .select("*")
+      .eq("subscription_id", subscriptionId)
+      .eq("user_id", userId)
+      .order("changed_at", { ascending: false });
+
+    if (error) {
+      logger.error("Failed to fetch price history:", error);
+      throw new Error(`Failed to fetch price history: ${error.message}`);
+    }
+
+    return data || [];
   }
 }
 
