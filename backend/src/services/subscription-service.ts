@@ -45,6 +45,7 @@ export class SubscriptionService {
             website_url: input.website_url || null,
             renewal_url: input.renewal_url || null,
             notes: input.notes || null,
+            visibility: input.visibility || "private",
             tags: input.tags || [],
             email_account_id: input.email_account_id || null,
             updated_at: new Date().toISOString(),

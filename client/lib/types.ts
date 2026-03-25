@@ -11,6 +11,7 @@ export interface Subscription {
   /** ISO date string */
   renewalDate?: string;
   category?: string;
+  visibility?: 'private' | 'team';
   /** History of payments/changes kept for merge operations */
   history?: SubscriptionHistoryEntry[];
   createdAt: string;

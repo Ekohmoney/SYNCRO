@@ -14,6 +14,7 @@ export interface Subscription {
   website_url: string | null;
   renewal_url: string | null;
   notes: string | null;
+  visibility: 'private' | 'team';
   tags: string[];
   expired_at: string | null;
   created_at: string;
@@ -38,6 +39,7 @@ export interface SubscriptionCreateInput {
   website_url?: string;
   renewal_url?: string;
   notes?: string;
+  visibility?: 'private' | 'team';
   tags?: string[];
   email_account_id?: string;
 }
@@ -55,5 +57,6 @@ export interface SubscriptionUpdateInput {
   website_url?: string;
   renewal_url?: string;
   notes?: string;
+  visibility?: 'private' | 'team';
   tags?: string[];
 }
