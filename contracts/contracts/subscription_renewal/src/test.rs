@@ -1,8 +1,6 @@
-#![no_std]
-
 use soroban_sdk::{
     contract, contractimpl, contracttype, contractevent,
-    Address, Env,
+    Address, Env, Symbol,
 };
 
 #[contracttype]

@@ -9,11 +9,15 @@ use soroban_sdk::{
     Address,
     Env,
     IntoVal,
-};#[contracttype]
+};
+
+#[contracttype]
 #[derive(Clone)]
 enum ContractKey {
     Admin,
     Paused,
+    LoggingContract,
+    FeeConfig,
 }
 
 /// Storage key for approvals: (sub_id, approval_id)
@@ -133,6 +137,98 @@ pub struct WindowUpdated {
     pub sub_id: u64,
     pub billing_start: u64,
     pub billing_end: u64,
+}
+
+// ── Renewal lock types ────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone)]
+struct RenewalLockKey {
+    lock_sub_id: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RenewalLockData {
+    pub locked_at: u32,
+    pub lock_timeout: u32,
+}
+
+#[contractevent]
+pub struct RenewalLockAcquired {
+    pub sub_id: u64,
+    pub locked_at: u32,
+    pub lock_timeout: u32,
+}
+
+#[contractevent]
+pub struct RenewalLockReleased {
+    pub sub_id: u64,
+    pub released_at: u32,
+}
+
+#[contractevent]
+pub struct RenewalLockExpired {
+    pub sub_id: u64,
+    pub original_locked_at: u32,
+    pub expired_at: u32,
+}
+
+// ── Lifecycle types ───────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone)]
+struct LifecycleKey {
+    lifecycle_sub_id: u64,
+}
+
+#[contractevent]
+pub struct LifecycleTimestampUpdated {
+    pub sub_id: u64,
+    pub event_kind: u32,
+    pub timestamp: u64,
+}
+
+// ── Renewal window types ──────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone)]
+struct WindowKey {
+    sub_id: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RenewalWindow {
+    pub billing_start: u64,
+    pub billing_end: u64,
+}
+
+// ── Cycle dedup types ─────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone)]
+struct CycleKey {
+    sub_id: u64,
+}
+
+#[contractevent]
+pub struct DuplicateRenewalRejected {
+    pub sub_id: u64,
+    pub cycle_id: u64,
+}
+
+// ── Integrity violation event ─────────────────────────────────────
+
+#[contractevent]
+pub struct IntegrityViolation {
+    pub sub_id: u64,
+}
+
+#[contractevent]
+pub struct LogEmitted {
+    pub sub_id: u64,
+    pub event_type: u32,
 }
 
 #[contract]
@@ -327,7 +423,7 @@ impl SubscriptionRenewalContract {
         );
     }
 
-    fn record_log(env: &Env, sub_id: u64, event_type: u32, data_str: soroban_sdk::String) {
+    fn record_log(env: &Env, sub_id: u64, event_type: u32, _data_str: soroban_sdk::String) {
         if let Some(_log_addr) = env
             .storage()
             .instance()
@@ -337,10 +433,7 @@ impl SubscriptionRenewalContract {
             // Since we are in a multi-contract setup, we'd use a client.
             // For now, we'll emit an event as a placeholder or assume the client is available.
             // (In a real implementation, we'd use a cross-contract call).
-            env.events().publish(
-                (soroban_sdk::symbol_short!("log"), sub_id),
-                (event_type, data_str),
-            );
+            LogEmitted { sub_id, event_type }.publish(env);
         }
     }
 
@@ -631,6 +724,8 @@ impl SubscriptionRenewalContract {
         if data.state == SubscriptionState::Failed {
             panic!("Subscription is in FAILED state");
         }
+
+        let current_ledger = env.ledger().sequence();
 
         // 4. Verify renewal lock exists and is not expired
         let lock_key = RenewalLockKey {
