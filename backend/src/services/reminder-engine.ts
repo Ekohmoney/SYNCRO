@@ -380,12 +380,18 @@ export class ReminderEngine {
   /**
    * Schedule reminders for subscriptions with upcoming renewals
    */
+
+  async scheduleReminders(daysBefore: number[] = this.defaultDaysBefore): Promise<void> {
+    const startTime = Date.now();
+    logger.info(`Scheduling reminders for days before: ${daysBefore.join(', ')}`);
+
   async scheduleReminders(
     daysBefore: number[] = this.defaultDaysBefore,
   ): Promise<void> {
     logger.info(
       `Scheduling reminders for days before: ${daysBefore.join(", ")}`,
     );
+
 
     try {
       const { data: subscriptions, error } = await supabase
@@ -409,17 +415,41 @@ export class ReminderEngine {
         `Found ${subscriptions.length} subscriptions to schedule reminders for`,
       );
 
+      // 1. Batch fetch user preferences
+      const userIds = [...new Set(subscriptions.map((s) => s.user_id))];
+      const { data: preferencesList, error: prefError } = await supabase
+        .from('user_preferences')
+        .select('*')
+        .in('user_id', userIds);
+
+      if (prefError) {
+        logger.error('Failed to fetch user preferences:', prefError);
+        throw prefError;
+      }
+
+      const preferencesMap = new Map<string, number[]>(
+        (preferencesList || []).map((p) => [p.user_id, p.reminder_timing])
+      );
+
+      // 2. Prepare records
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const records: any[] = [];
+
       for (const subscription of subscriptions) {
         if (!subscription.active_until) continue;
+
+
+        // Use user's preferred timing if available, otherwise use default
+        const userDaysBefore = preferencesMap.get(subscription.user_id) || daysBefore;
 
         const preferences = await userPreferenceService.getPreferences(
           subscription.user_id,
         );
         const userDaysBefore = preferences.reminder_timing;
 
+
         const renewalDate = new Date(subscription.active_until);
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
 
         for (const days of userDaysBefore) {
           const reminderDate = new Date(renewalDate);
@@ -427,6 +457,49 @@ export class ReminderEngine {
           reminderDate.setHours(0, 0, 0, 0);
 
           if (reminderDate >= today) {
+
+            records.push({
+              subscription_id: subscription.id,
+              user_id: subscription.user_id,
+              reminder_date: reminderDate.toISOString().split('T')[0],
+              reminder_type: 'renewal',
+              days_before: days,
+              status: 'pending',
+              updated_at: new Date().toISOString(),
+            });
+          }
+        }
+      }
+
+      if (records.length === 0) {
+        logger.info('No reminders need to be scheduled');
+        return;
+      }
+
+      // 3. Batch upsert — Supabase supports up to 1000 rows per upsert
+      const BATCH_SIZE = 500;
+      let totalUpserted = 0;
+
+      for (let i = 0; i < records.length; i += BATCH_SIZE) {
+        const batch = records.slice(i, i + BATCH_SIZE);
+        const { error: upsertError } = await supabase
+          .from('reminder_schedules')
+          .upsert(batch, { onConflict: 'subscription_id,reminder_date' });
+
+        if (upsertError) {
+          logger.error('Failed to batch upsert reminders:', upsertError);
+          throw upsertError;
+        }
+        totalUpserted += batch.length;
+      }
+
+      const duration = Date.now() - startTime;
+      logger.info(
+        `Reminder scheduling completed in ${duration}ms. Total reminders processed: ${records.length}, Batched in ${Math.ceil(
+          records.length / BATCH_SIZE,
+        )} round trips.`,
+      );
+
             const { data: existing } = await supabase
               .from("reminder_schedules")
               .select("id")
@@ -454,6 +527,7 @@ export class ReminderEngine {
       }
 
       logger.info("Reminder scheduling completed");
+
     } catch (error) {
       logger.error("Error scheduling reminders:", error);
       throw error;
