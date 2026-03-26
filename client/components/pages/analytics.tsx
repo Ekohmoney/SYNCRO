@@ -20,9 +20,10 @@ interface AnalyticsPageProps {
   totalSpend: number
   darkMode?: boolean
   mode?: string
+  savedBySyncroCount?: number
 }
 
-export default function AnalyticsPage({ subscriptions, totalSpend, darkMode, mode = "individual" }: AnalyticsPageProps) {
+export default function AnalyticsPage({ subscriptions, totalSpend, darkMode, mode = "individual", savedBySyncroCount = 0 }: AnalyticsPageProps) {
   const [view, setView] = useState("default") // 'default', 'calendar', 'comparison'
   const [currentMonth, setCurrentMonth] = useState(new Date())
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
@@ -328,6 +329,21 @@ export default function AnalyticsPage({ subscriptions, totalSpend, darkMode, mod
           </div>
         </div>
       </div>
+
+      {/* Saved by SYNCRO metric */}
+      {savedBySyncroCount > 0 && (
+        <div className={`border rounded-xl p-6 flex items-center gap-5 ${darkMode ? "bg-[#2D3748] border-[#374151]" : "bg-white border-gray-200"}`}>
+          <div className="text-4xl" aria-hidden="true">🛡️</div>
+          <div>
+            <h3 className={`text-lg font-semibold ${darkMode ? "text-white" : "text-[#1E2A35]"}`}>
+              Saved by SYNCRO
+            </h3>
+            <p className={`text-sm ${darkMode ? "text-gray-400" : "text-gray-600"}`}>
+              You cancelled <span className="font-bold text-[#007A5C]">{savedBySyncroCount}</span> trial{savedBySyncroCount !== 1 ? "s" : ""} before being auto-charged — nice work.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Calendar View */}
       {view === "calendar" && (
