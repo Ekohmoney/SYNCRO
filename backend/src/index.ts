@@ -24,7 +24,14 @@ import { scheduleAutoResume } from './jobs/auto-resume';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-const ADMIN_API_KEY = process.env.ADMIN_API_KEY || 'development-admin-key';
+const ADMIN_API_KEY = process.env.ADMIN_API_KEY;
+
+if (!ADMIN_API_KEY) {
+  throw new Error(
+    'ADMIN_API_KEY environment variable is required. ' +
+    'Please set it to a strong random value and restart the server.'
+  );
+}
 
 // CORS configuration
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
