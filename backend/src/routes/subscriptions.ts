@@ -6,6 +6,10 @@ import { idempotencyService } from '../services/idempotency';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth';
 import { validateSubscriptionOwnership, validateBulkSubscriptionOwnership } from '../middleware/ownership';
 import logger from '../config/logger';
+import type { Subscription } from '../types/subscription';
+
+const resolveParam = (p: string | string[]): string =>
+  Array.isArray(p) ? p[0] : p;
 
 // Zod schema for URL fields — only http/https allowed
 const safeUrlSchema = z
@@ -48,17 +52,37 @@ router.use(authenticate);
 
 /**
  * GET /api/subscriptions
- * List user's subscriptions with optional filtering
+ * List user's subscriptions with cursor-based pagination and optional filtering.
+ *
+ * Query params:
+ *   limit    - max items per page (1–100, default 20)
+ *   cursor   - opaque base64 cursor returned by previous response
+ *   status   - filter by subscription status
+ *   category - filter by category
+ *
+ * Response pagination object:
+ *   total      - total count across all pages (ignores cursor / limit)
+ *   limit      - effective page size used
+ *   hasMore    - whether another page exists after this one
+ *   nextCursor - cursor to pass on the next request (null when on last page)
  */
 router.get("/", async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { status, category, limit, offset } = req.query;
+    const rawLimit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
+
+    // Reject non-numeric or out-of-range limit values early
+    if (rawLimit !== undefined && (isNaN(rawLimit) || rawLimit < 1)) {
+      return res.status(400).json({
+        success: false,
+        error: "limit must be a positive integer",
+      });
+    }
 
     const result = await subscriptionService.listSubscriptions(req.user!.id, {
-      status: status as string | undefined,
-      category: category as string | undefined,
-      limit: limit ? parseInt(limit as string) : undefined,
-      offset: offset ? parseInt(offset as string) : undefined,
+      status: req.query.status as Subscription['status'] | undefined,
+      category: req.query.category as string | undefined,
+      limit: rawLimit,
+      cursor: req.query.cursor as string | undefined,
     });
 
     res.json({
@@ -66,12 +90,22 @@ router.get("/", async (req: AuthenticatedRequest, res: Response) => {
       data: result.subscriptions,
       pagination: {
         total: result.total,
-        limit: limit ? parseInt(limit as string) : undefined,
-        offset: offset ? parseInt(offset as string) : undefined,
+        limit: Math.min(rawLimit ?? 20, 100),
+        hasMore: result.hasMore,
+        nextCursor: result.nextCursor ?? null,
       },
     });
   } catch (error) {
     logger.error("List subscriptions error:", error);
+
+    // Surface cursor decode errors as 400 rather than 500
+    if (error instanceof Error && error.message.includes("cursor")) {
+      return res.status(400).json({
+        success: false,
+        error: error.message,
+      });
+    }
+
     res.status(500).json({
       success: false,
       error:
@@ -88,7 +122,7 @@ router.get("/:id", validateSubscriptionOwnership, async (req: AuthenticatedReque
   try {
     const subscription = await subscriptionService.getSubscription(
       req.user!.id,
-      Array.isArray(req.params.id) ? req.params.id[0] : req.params.id
+      resolveParam(req.params.id)
     );
 
     res.json({
@@ -236,7 +270,7 @@ router.patch("/:id", validateSubscriptionOwnership, async (req: AuthenticatedReq
 
     const result = await subscriptionService.updateSubscription(
       req.user!.id,
-      Array.isArray(req.params.id) ? req.params.id[0] : req.params.id,
+      resolveParam(req.params.id),
       req.body,
       expectedVersion ? parseInt(expectedVersion) : undefined,
     );
@@ -287,7 +321,7 @@ router.delete("/:id", validateSubscriptionOwnership, async (req: AuthenticatedRe
   try {
     const result = await subscriptionService.deleteSubscription(
       req.user!.id,
-      Array.isArray(req.params.id) ? req.params.id[0] : req.params.id
+      resolveParam(req.params.id)
     );
 
     const responseBody = {
@@ -325,7 +359,7 @@ router.delete("/:id", validateSubscriptionOwnership, async (req: AuthenticatedRe
  */
 router.post('/:id/attach-gift-card', validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const subscriptionId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const subscriptionId = resolveParam(req.params.id);
     if (!subscriptionId) {
       return res.status(400).json({ success: false, error: 'Subscription ID required' });
     }
@@ -379,7 +413,7 @@ router.post("/:id/retry-sync", validateSubscriptionOwnership, async (req: Authen
   try {
     const result = await subscriptionService.retryBlockchainSync(
       req.user!.id,
-      Array.isArray(req.params.id) ? req.params.id[0] : req.params.id
+      resolveParam(req.params.id)
     );
 
     res.json({
@@ -389,7 +423,7 @@ router.post("/:id/retry-sync", validateSubscriptionOwnership, async (req: Authen
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Failed to retry sync";
-    
+
     // Check if it's a cooldown error
     if (errorMessage.includes("Cooldown period active")) {
       logger.warn("Retry sync rejected due to cooldown:", errorMessage);
@@ -399,7 +433,7 @@ router.post("/:id/retry-sync", validateSubscriptionOwnership, async (req: Authen
         retryAfter: extractWaitTime(errorMessage),
       });
     }
-    
+
     logger.error("Retry sync error:", error);
     res.status(500).json({
       success: false,
@@ -415,7 +449,7 @@ router.post("/:id/retry-sync", validateSubscriptionOwnership, async (req: Authen
 router.get("/:id/cooldown-status", validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const cooldownStatus = await subscriptionService.checkRenewalCooldown(
-      req.params.id,
+      resolveParam(req.params.id),
     );
 
     res.json({
@@ -466,7 +500,7 @@ router.post("/:id/cancel", validateSubscriptionOwnership, async (req: Authentica
 
     const result = await subscriptionService.cancelSubscription(
       req.user!.id,
-      req.params.id,
+      resolveParam(req.params.id),
     );
 
     const responseBody = {
@@ -508,11 +542,6 @@ router.post("/:id/cancel", validateSubscriptionOwnership, async (req: Authentica
   }
 });
 
-/**
- * POST /api/subscriptions/:id/pause
- * Pause subscription — skips reminders, risk scoring, and projected spend
- * Body: { resumeAt?: string (ISO date), reason?: string }
- */
 /**
  * POST /api/subscriptions/:id/pause
  * Pause subscription — skips reminders, risk scoring, and projected spend
@@ -561,7 +590,7 @@ router.post("/:id/pause", validateSubscriptionOwnership, async (req: Authenticat
 
     const result = await subscriptionService.pauseSubscription(
       req.user!.id,
-      req.params.id,
+      resolveParam(req.params.id),
       resumeAt,
       reason,
     );
@@ -593,8 +622,8 @@ router.post("/:id/pause", validateSubscriptionOwnership, async (req: Authenticat
     logger.error("Pause subscription error:", error);
     const statusCode =
       error instanceof Error && error.message.includes("not found") ? 404
-      : error instanceof Error && error.message.includes("already paused") ? 409
-      : 500;
+        : error instanceof Error && error.message.includes("already paused") ? 409
+          : 500;
     res.status(statusCode).json({
       success: false,
       error: error instanceof Error ? error.message : "Failed to pause subscription",
@@ -627,7 +656,7 @@ router.post("/:id/resume", validateSubscriptionOwnership, async (req: Authentica
 
     const result = await subscriptionService.resumeSubscription(
       req.user!.id,
-      req.params.id,
+      resolveParam(req.params.id),
     );
 
     const responseBody = {
@@ -657,8 +686,8 @@ router.post("/:id/resume", validateSubscriptionOwnership, async (req: Authentica
     logger.error("Resume subscription error:", error);
     const statusCode =
       error instanceof Error && error.message.includes("not found") ? 404
-      : error instanceof Error && error.message.includes("not paused") ? 409
-      : 500;
+        : error instanceof Error && error.message.includes("not paused") ? 409
+          : 500;
     res.status(statusCode).json({
       success: false,
       error: error instanceof Error ? error.message : "Failed to resume subscription",
