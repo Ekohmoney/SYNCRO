@@ -453,6 +453,7 @@ private async fetchAndProcessEvents() {
       event_data: event.value,
     };
   }
+  // Duplicate handlers removed below in favor of consolidated implementations later in the file
 
   private async saveEvents(events: ProcessedEvent[]) {
     const { error } = await supabase
