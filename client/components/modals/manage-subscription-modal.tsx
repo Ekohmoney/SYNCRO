@@ -2,6 +2,9 @@
 
 import { X, Edit, Trash2, ExternalLink, Calendar, DollarSign, Tag, Pause, Play, Ban } from "lucide-react"
 import { useState } from "react"
+import { NotesEditor } from "@/components/ui/notes-editor"
+import { TagInput } from "@/components/ui/tag-input"
+import { useTags } from "@/hooks/use-tags"
 
 const CANCEL_LINKS = {
   "ChatGPT Plus": "https://platform.openai.com/account/billing/overview",
@@ -41,6 +44,20 @@ export default function ManageSubscriptionModal({
   const [showConfirmDelete, setShowConfirmDelete] = useState(false)
   const [showConfirmCancel, setShowConfirmCancel] = useState(false)
   const [showConfirmPause, setShowConfirmPause] = useState(false)
+  const { tags, addTagToSubscription, removeTagFromSubscription, createTag, saveNotes } = useTags()
+  const [assignedTagIds, setAssignedTagIds] = useState<string[]>(
+    subscription.custom_tag_ids ?? [],
+  )
+
+  const handleAddTag = async (tagId: string) => {
+    await addTagToSubscription(String(subscription.id), tagId)
+    setAssignedTagIds((prev) => [...prev, tagId])
+  }
+
+  const handleRemoveTag = async (tagId: string) => {
+    await removeTagFromSubscription(String(subscription.id), tagId)
+    setAssignedTagIds((prev) => prev.filter((id) => id !== tagId))
+  }
 
   const cancelLink = (CANCEL_LINKS as Record<string, string>)[subscription.name] || subscription.renewalUrl
 
@@ -171,7 +188,7 @@ export default function ManageSubscriptionModal({
               </div>
             )}
 
-            {/* Tags */}
+            {/* Legacy plain tags */}
             {subscription.tags && subscription.tags.length > 0 && (
               <div className="mt-4 flex items-center gap-2 flex-wrap">
                 <Tag className="w-4 h-4 text-gray-400" />
@@ -185,6 +202,29 @@ export default function ManageSubscriptionModal({
                 ))}
               </div>
             )}
+
+            {/* Custom coloured tags */}
+            <div className="mt-4">
+              <p className={`text-xs font-medium mb-1.5 ${darkMode ? "text-gray-400" : "text-gray-500"}`}>
+                Custom tags
+              </p>
+              <TagInput
+                allTags={tags}
+                selectedTagIds={assignedTagIds}
+                onAdd={handleAddTag}
+                onRemove={handleRemoveTag}
+                onCreateTag={createTag}
+                darkMode={darkMode}
+              />
+            </div>
+
+            {/* Notes */}
+            <NotesEditor
+              subscriptionId={String(subscription.id)}
+              initialNotes={subscription.notes ?? ""}
+              onSave={saveNotes}
+              darkMode={darkMode}
+            />
           </div>
 
           {/* Action Buttons */}
