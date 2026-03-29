@@ -1,4 +1,7 @@
 [![TypeScript Check](https://github.com/Calebux/SYNCRO/actions/workflows/typecheck.yml/badge.svg)](https://github.com/Calebux/SYNCRO/actions/workflows/typecheck.yml)
+# SYNCRO
+
+![Tests](https://github.com/Calebux/SYNCRO/actions/workflows/test.yml/badge.svg)
 
 ## Synchro — Self-Custodial Subscription Manager (MVP)
 
