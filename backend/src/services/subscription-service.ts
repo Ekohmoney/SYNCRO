@@ -113,18 +113,16 @@ export class SubscriptionService {
   }
 
   /**
-   * Update subscription with blockchain sync.
-   * Uses optimistic locking to prevent race conditions.
+   * Delete subscription with blockchain sync
+   * Soft delete: sets status to 'deleted' and removes reminders
    */
-  async updateSubscription(
+  async deleteSubscription(
     userId: string,
     subscriptionId: string,
-    input: SubscriptionUpdateInput,
-    expectedVersion?: number,
   ): Promise<SubscriptionSyncResult> {
     return await DatabaseTransaction.execute(async (client) => {
       try {
-        // Verify ownership before updating
+        // 1. Verify ownership and get subscription details
         const { data: existing, error: fetchError } = await client
           .from("subscriptions")
           .select("*")
@@ -136,85 +134,16 @@ export class SubscriptionService {
           throw new Error("Subscription not found or access denied");
         }
 
-        // Explicit allowlist — prevents field injection attacks by never spreading raw input
-        const {
-          name,
-          provider,
-          merchant_id,
-          price,
-          currency,
-          billing_cycle,
-          status,
-          next_billing_date,
-          category,
-          logo_url,
-          website_url,
-          renewal_url,
-          notes,
-          tags,
-        } = input;
-
-        const updateData: Partial<SubscriptionUpdateInput> & { updated_at: string } = {
-          ...(name !== undefined && { name }),
-          ...(provider !== undefined && { provider }),
-          ...(merchant_id !== undefined && { merchant_id }),
-          ...(price !== undefined && { price }),
-          ...(currency !== undefined && { currency }),
-          ...(billing_cycle !== undefined && { billing_cycle }),
-          ...(status !== undefined && { status }),
-          ...(next_billing_date !== undefined && { next_billing_date }),
-          ...(category !== undefined && { category }),
-          ...(logo_url !== undefined && { logo_url }),
-          ...(website_url !== undefined && { website_url }),
-          ...(renewal_url !== undefined && { renewal_url }),
-          ...(notes !== undefined && { notes }),
-          ...(tags !== undefined && { tags }),
-          updated_at: new Date().toISOString(),
-        };
-
-        const { data: subscription, error: updateError } = await client
-          .from("subscriptions")
-          .update(updateData)
-          .eq("id", subscriptionId)
-          .eq("user_id", userId)
-          .select()
-          .single();
-
-        if (updateError) {
-          throw new Error(`Update failed: ${updateError.message}`);
-        }
-
-        // Attempt blockchain sync
-        let blockchainResult;
-        let syncStatus: "synced" | "partial" | "failed" = "synced";
-
-        try {
-          blockchainResult = await blockchainService.syncSubscription(
-            userId,
-            subscriptionId,
-            "update",
-            subscription,
-          );
-
-          if (!blockchainResult.success) {
-            syncStatus = "partial";
-            logger.warn("Blockchain sync failed for subscription update", {
-              subscriptionId,
-              error: blockchainResult.error,
-            });
-          }
-        } catch (blockchainError) {
-          syncStatus = "partial";
-          logger.error("Blockchain sync error (non-fatal):", blockchainError);
-          blockchainResult = {
-            success: false,
-            error:
-              blockchainError instanceof Error
-                ? blockchainError.message
-                : String(blockchainError),
+        // If already deleted, return early
+        if (existing.status === "deleted") {
+          return {
+            subscription: existing as Subscription,
+            syncStatus: "synced",
           };
         }
 
+        // 2. Soft delete - update status to deleted
+        const { data: subscription, error: updateError } = await client
         // Trigger budget check
         analyticsService.checkBudgetThreshold(userId).catch(e => 
           logger.error('Background budget check failed:', e)
@@ -256,7 +185,8 @@ export class SubscriptionService {
         const { data: updatedSubscription, error: updateError } = await client
           .from("subscriptions")
           .update({
-            status: "cancelled",
+            status: "deleted",
+            deleted_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           })
           .eq("id", subscriptionId)
@@ -265,9 +195,12 @@ export class SubscriptionService {
           .single();
 
         if (updateError) {
-          throw new Error(`Update failed: ${updateError.message}`);
+          throw new Error(`Delete failed: ${updateError.message}`);
         }
 
+        // 3. Cancel all pending reminders for this subscription
+        const { error: reminderError } = await client
+          .from("reminder_schedules")
         let blockchainResult;
         let syncStatus: "synced" | "partial" | "failed" = "synced";
 
@@ -334,13 +267,17 @@ export class SubscriptionService {
         const { error: deleteError } = await client
           .from("subscriptions")
           .delete()
-          .eq("id", subscriptionId)
-          .eq("user_id", userId);
+          .eq("subscription_id", subscriptionId);
 
-        if (deleteError) {
-          throw new Error(`Delete failed: ${deleteError.message}`);
+        if (reminderError) {
+          logger.warn("Failed to delete reminders during subscription deletion", {
+            subscriptionId,
+            error: reminderError.message,
+          });
+          // Don't throw - reminders cleanup failure shouldn't block deletion
         }
 
+        // 4. Sync to blockchain (non-fatal if it fails)
         let blockchainResult;
         let syncStatus: "synced" | "partial" | "failed" = "synced";
 
@@ -362,7 +299,7 @@ export class SubscriptionService {
           }
         } catch (blockchainError) {
           syncStatus = "partial";
-          logger.error("Blockchain sync error (non-fatal):", blockchainError);
+          logger.error("Blockchain sync error during deletion (non-fatal):", blockchainError);
           blockchainResult = {
             success: false,
             error:
@@ -372,6 +309,12 @@ export class SubscriptionService {
           };
         }
 
+        // 5. Log audit event
+        logger.info("Subscription deleted", {
+          subscriptionId,
+          userId,
+          syncStatus,
+        });
         // Trigger budget check
         analyticsService.checkBudgetThreshold(userId).catch(e => 
           logger.error('Background budget check failed:', e)
@@ -614,6 +557,15 @@ export class SubscriptionService {
       } catch (error) {
         logger.error("Pause failed:", error);
         throw error;
+      }
+    });
+
+  async resumeSubscription(
+    userId: string,
+    subscriptionId: string,
+  ): Promise<SubscriptionSyncResult> {
+    return await DatabaseTransaction.execute(async (client) => {
+      try {
         // 1. Fetch and verify ownership
         const { data: subscription, error: fetchError } = await client
           .from("subscriptions")
@@ -673,6 +625,8 @@ export class SubscriptionService {
       } catch (error) {
         logger.error("Resume failed:", error);
         throw error;
+      }
+    });
 
   /**
    * Get subscription by ID (with ownership check)
@@ -690,7 +644,6 @@ export class SubscriptionService {
     }
 
     return subscription;
-  }
 
   // List user's subscriptions with cursor-based pagination
   /**
@@ -755,8 +708,24 @@ export class SubscriptionService {
       total: count ?? 0,
       hasMore,
       nextCursor,
+    // Fetch latest price change for each subscription
+    const enhancedSubscriptions = await Promise.all(
+      (subscriptions || []).map(async (sub) => {
+        const { data: priceHistory } = await supabase
+          .from("subscription_price_history")
+          .select("*")
+          .eq("subscription_id", sub.id)
+          .order("changed_at", { ascending: false })
+          .limit(1);
+        return {
+          ...sub,
+          latest_price_change: priceHistory && priceHistory.length > 0 ? priceHistory[0] : null,
+        };
+      })
+    );
+      subscriptions: enhancedSubscriptions,
+      total: count || 0,
     };
-  }
 
   /**
    * Check if a renewal can be attempted based on cooldown period.
@@ -785,7 +754,6 @@ export class SubscriptionService {
       logger.error("Error checking renewal cooldown:", error);
       throw error;
     }
-  }
 
   /**
    * Retry blockchain sync for a subscription with cooldown enforcement.
@@ -862,6 +830,28 @@ export class SubscriptionService {
       logger.error("Renewal retry failed:", error);
       throw error;
     }
+  }
+
+  /**
+   * Get price history for a subscription
+   */
+  async getPriceHistory(
+    userId: string,
+    subscriptionId: string
+  ): Promise<any[]> {
+    const { data, error } = await supabase
+      .from("subscription_price_history")
+      .select("*")
+      .eq("subscription_id", subscriptionId)
+      .eq("user_id", userId)
+      .order("changed_at", { ascending: false });
+
+    if (error) {
+      logger.error("Failed to fetch price history:", error);
+      throw new Error(`Failed to fetch price history: ${error.message}`);
+    }
+
+    return data || [];
   }
 }
 
