@@ -277,6 +277,7 @@ router.patch("/:id", validateSubscriptionOwnership, async (req: AuthenticatedReq
 router.delete("/:id", validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const result = await subscriptionService.deleteSubscription(
+    const result = await subscriptionService.cancelSubscription(
       req.user!.id,
       Array.isArray(req.params.id) ? req.params.id[0] : req.params.id
     );
@@ -407,6 +408,7 @@ router.get("/:id/cooldown-status", validateSubscriptionOwnership, async (req: Au
   try {
     const cooldownStatus = await subscriptionService.checkRenewalCooldown(
       req.params.id,
+     Array.isArray(req.params.id) ? req.params.id[0] : req.params.id,
     );
 
     res.json({
@@ -575,6 +577,44 @@ router.get("/:id", validateSubscriptionOwnership, async (req: AuthenticatedReque
     });
   } catch (error) {
     logger.error("Get subscription error:", error);
+router.post("/:id/cancel", validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
+    const idempotencyKey = req.headers["idempotency-key"] as string;
+    const requestHash = idempotencyService.hashRequest(req.body);
+    // Check idempotency if key provided
+    if (idempotencyKey) {
+      const idempotencyCheck = await idempotencyService.checkIdempotency(
+        idempotencyKey,
+        req.user!.id,
+        requestHash,
+      );
+      if (idempotencyCheck.isDuplicate && idempotencyCheck.cachedResponse) {
+        return res
+          .status(idempotencyCheck.cachedResponse.status)
+          .json(idempotencyCheck.cachedResponse.body);
+      }
+    }
+    const result = await subscriptionService.cancelSubscription(
+      Array.isArray(req.params.id) ? req.params.id[0] : req.params.id,
+    const responseBody = {
+      data: result.subscription,
+      blockchain: {
+        synced: result.syncStatus === "synced",
+        transactionHash: result.blockchainResult?.transactionHash,
+        error: result.blockchainResult?.error,
+      },
+    };
+    const statusCode = result.syncStatus === "failed" ? 207 : 200;
+    if (idempotencyKey) {
+      await idempotencyService.storeResponse(
+        idempotencyKey,
+        req.user!.id,
+        requestHash,
+        statusCode,
+        responseBody,
+      );
+    }
+    res.status(statusCode).json(responseBody);
+    logger.error("Cancel subscription error:", error);
     const statusCode =
       error instanceof Error && error.message.includes("not found")
         ? 404
@@ -583,6 +623,9 @@ router.get("/:id", validateSubscriptionOwnership, async (req: AuthenticatedReque
       success: false,
       error:
         error instanceof Error ? error.message : "Failed to get subscription",
+        error instanceof Error
+          ? error.message
+          : "Failed to cancel subscription",
     });
 export function validateMnemonic(mnemonic: string): boolean {
   if (!mnemonic || typeof mnemonic !== 'string') {
@@ -666,6 +709,38 @@ router.post("/", async (req: AuthenticatedRequest, res: Response) => {
         error instanceof Error
           ? error.message
           : "Failed to create subscription",
+ * POST /api/subscriptions/bulk
+ * Bulk operations (delete, update status, etc.)
+router.post("/bulk", validateBulkSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
+    const { operation, ids, data } = req.body;
+    if (!operation || !ids || !Array.isArray(ids)) {
+        error: "Missing required fields: operation, ids",
+    const results = [];
+    const errors = [];
+    for (const id of ids) {
+      try {
+        let result;
+        switch (operation) {
+          case "delete":
+            result = await subscriptionService.cancelSubscription(req.user!.id, id);
+            break;
+          case "update":
+            if (!data) throw new Error("Update data required");
+            result = await subscriptionService.updateSubscription(req.user!.id, id, data);
+            break;
+          default:
+            throw new Error(`Unknown operation: ${operation}`);
+        }
+        results.push({ id, success: true, result });
+      } catch (error) {
+        errors.push({ id, error: error instanceof Error ? error.message : String(error) });
+    res.json({
+      success: errors.length === 0,
+      results,
+      errors: errors.length > 0 ? errors : undefined,
+    });
+    logger.error("Bulk operation error:", error);
+      error: error instanceof Error ? error.message : "Failed to perform bulk operation",
     });
   const words = mnemonic.trim().split(/\s+/);
   if (words.length !== 12) {
