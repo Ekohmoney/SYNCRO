@@ -28,6 +28,8 @@ interface SettingsPageProps {
   onCurrencyChange: (currency: Currency) => void
   accountType?: string
   onUpgradeToTeam?: (workspaceData: any) => void
+  payments?: any[]
+  onRefund?: (transactionId: string) => void
 }
 
 export default function SettingsPage({
@@ -40,6 +42,8 @@ export default function SettingsPage({
   onCurrencyChange,
   accountType = "individual",
   onUpgradeToTeam,
+  payments = [],
+  onRefund,
 }: SettingsPageProps) {
   const [alertThreshold, setAlertThreshold] = useState(80)
   const [emailAlerts, setEmailAlerts] = useState(true)
@@ -549,6 +553,68 @@ export default function SettingsPage({
             />
           </div>
         </div>
+      </div>
+
+      {/* Payment History */}
+      <div className={`border rounded-xl p-6 ${darkMode ? "bg-gray-900 border-gray-800" : "bg-white border-gray-200"}`}>
+        <h3 className={`text-lg font-semibold mb-4 flex items-center gap-2 ${darkMode ? "text-white" : "text-gray-900"}`}>
+          <DollarSign className="w-5 h-5" />
+          Payment History
+        </h3>
+        
+        {payments.length === 0 ? (
+          <p className={`text-sm ${darkMode ? "text-gray-400" : "text-gray-600"}`}>
+            No payment records found.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className={`border-b ${darkMode ? "border-gray-800 text-gray-400" : "border-gray-100 text-gray-500"}`}>
+                  <th className="pb-2 font-medium">Date</th>
+                  <th className="pb-2 font-medium">Plan</th>
+                  <th className="pb-2 font-medium">Amount</th>
+                  <th className="pb-2 font-medium">Status</th>
+                  <th className="pb-2 font-medium text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                {payments.map((payment) => (
+                  <tr key={payment.id} className={darkMode ? "text-gray-300" : "text-gray-700"}>
+                    <td className="py-3">
+                      {new Date(payment.created_at).toLocaleDateString()}
+                    </td>
+                    <td className="py-3 capitalize">{payment.plan_name}</td>
+                    <td className="py-3 uppercase">
+                      {payment.amount} {payment.currency}
+                    </td>
+                    <td className="py-3">
+                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                        payment.status === "succeeded" 
+                          ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                          : payment.status === "refunded"
+                          ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
+                          : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+                      }`}>
+                        {payment.status}
+                      </span>
+                    </td>
+                    <td className="py-3 text-right">
+                      {payment.status === "succeeded" && (
+                        <button
+                          onClick={() => onRefund?.(payment.transaction_id)}
+                          className="text-xs text-red-600 hover:underline"
+                        >
+                          Request Refund
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Notification Preferences */}

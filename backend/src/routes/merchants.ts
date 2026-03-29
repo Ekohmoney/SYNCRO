@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { merchantService } from '../services/merchant-service';
 import logger from '../config/logger';
 import { adminAuth } from '../middleware/admin';
+import { renewalRateLimiter } from '../middleware/rateLimiter';
 
 // ─── Validation schemas ───────────────────────────────────────────────────────
 
@@ -236,6 +237,7 @@ router.post('/', adminAuth, async (req: Request, res: Response) => {
  *       401:
  *         description: Unauthorized
  */
+router.patch('/:id', adminAuth, renewalRateLimiter, async (req: Request, res: Response) => {
 router.patch('/:id', adminAuth, async (req: Request, res: Response) => {
     try {
         const validation = updateMerchantSchema.safeParse(req.body);

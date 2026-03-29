@@ -1,3 +1,17 @@
+import { Router, Response } from "express";
+import { subscriptionService } from "../services/subscription-service";
+import { idempotencyService } from "../services/idempotency";
+import { authenticate, AuthenticatedRequest } from "../middleware/auth";
+import {
+  validateSubscriptionOwnership,
+  validateBulkSubscriptionOwnership,
+} from "../middleware/ownership";
+import logger from "../config/logger";
+
+const router = Router();
+
+// All routes require authentication
+router.use(authenticate);
 import * as bip39 from 'bip39';
 
 /**
@@ -72,6 +86,8 @@ router.get("/", async (req: AuthenticatedRequest, res: Response) => {
 });
 
 /**
+ * GET /api/subscriptions/:id
+ * Get single subscription by ID
  * @openapi
  * /api/subscriptions/{id}:
  *   get:
@@ -125,6 +141,32 @@ router.get("/:id", validateSubscriptionOwnership, async (req: AuthenticatedReque
 });
 
 /**
+ * GET /api/subscriptions/:id/price-history
+ * Get price history for a subscription
+ */
+router.get("/:id/price-history", validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const history = await subscriptionService.getPriceHistory(
+      req.user!.id,
+      Array.isArray(req.params.id) ? req.params.id[0] : req.params.id
+    );
+
+    res.json({
+      success: true,
+      data: history,
+    });
+  } catch (error) {
+    logger.error("Get price history error:", error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to get price history",
+    });
+  }
+});
+
+/**
+ * POST /api/subscriptions
+ * Create new subscription with idempotency support
  * @openapi
  * /api/subscriptions:
  *   post:
@@ -256,6 +298,8 @@ router.post("/", async (req: AuthenticatedRequest, res: Response) => {
 });
 
 /**
+ * PATCH /api/subscriptions/:id
+ * Update subscription with optimistic locking
  * @openapi
  * /api/subscriptions/{id}:
  *   patch:
@@ -382,6 +426,8 @@ router.patch("/:id", validateSubscriptionOwnership, async (req: AuthenticatedReq
 });
 
 /**
+ * DELETE /api/subscriptions/:id
+ * Delete subscription
  * @openapi
  * /api/subscriptions/{id}:
  *   delete:
@@ -407,6 +453,7 @@ router.patch("/:id", validateSubscriptionOwnership, async (req: AuthenticatedReq
 router.delete("/:id", validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const result = await subscriptionService.deleteSubscription(
+    const result = await subscriptionService.cancelSubscription(
       req.user!.id,
       Array.isArray(req.params.id) ? req.params.id[0] : req.params.id
     );
@@ -441,6 +488,8 @@ router.delete("/:id", validateSubscriptionOwnership, async (req: AuthenticatedRe
 });
 
 /**
+ * POST /api/subscriptions/:id/attach-gift-card
+ * Attach gift card info to a subscription
  * @openapi
  * /api/subscriptions/{id}/attach-gift-card:
  *   post:
@@ -521,6 +570,9 @@ router.post('/:id/attach-gift-card', validateSubscriptionOwnership, async (req: 
 });
 
 /**
+ * POST /api/subscriptions/:id/retry-sync
+ * Retry blockchain sync for a subscription
+ * Enforces cooldown period to prevent rapid repeated attempts
  * @openapi
  * /api/subscriptions/{id}/retry-sync:
  *   post:
@@ -583,6 +635,8 @@ router.post("/:id/retry-sync", validateSubscriptionOwnership, async (req: Authen
 });
 
 /**
+ * GET /api/subscriptions/:id/cooldown-status
+ * Check if a subscription can be retried or if cooldown is active
  * @openapi
  * /api/subscriptions/{id}/cooldown-status:
  *   get:
@@ -615,6 +669,7 @@ router.get("/:id/cooldown-status", validateSubscriptionOwnership, async (req: Au
   try {
     const cooldownStatus = await subscriptionService.checkRenewalCooldown(
       req.params.id,
+     Array.isArray(req.params.id) ? req.params.id[0] : req.params.id,
     );
 
     res.json({
@@ -637,9 +692,137 @@ router.get("/:id/cooldown-status", validateSubscriptionOwnership, async (req: Au
 function extractWaitTime(message: string): number {
   const match = message.match(/wait (\d+) seconds/);
   return match ? parseInt(match[1], 10) : 60;
+export function generateMnemonic(): string {
+  return bip39.generateMnemonic(128);
 }
 
 /**
+ * POST /api/subscriptions/:id/trial/convert
+ * Mark a trial as intentionally converted to paid ("Keep My Subscription").
+ * Logs the conversion event and updates the subscription status.
+ */
+router.post('/:id/trial/convert', validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const subId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+
+    const { data: sub, error: fetchErr } = await (await import('../config/database')).supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('id', subId)
+      .eq('user_id', req.user!.id)
+      .single();
+
+    if (fetchErr || !sub) {
+      return res.status(404).json({ success: false, error: 'Subscription not found' });
+    }
+
+    if (!sub.is_trial) {
+      return res.status(400).json({ success: false, error: 'Subscription is not a trial' });
+    }
+
+    const db = (await import('../config/database')).supabase;
+
+    // Update subscription: mark as active paid subscription
+    await db.from('subscriptions').update({
+      is_trial: false,
+      status: 'active',
+      price: sub.trial_converts_to_price ?? sub.price_after_trial ?? sub.price,
+      updated_at: new Date().toISOString(),
+    }).eq('id', subId);
+
+    // Log conversion event
+    await db.from('trial_conversion_events').insert({
+      subscription_id: subId,
+      user_id: req.user!.id,
+      outcome: 'converted',
+      conversion_type: 'intentional',
+      saved_by_syncro: false,
+      converted_price: sub.trial_converts_to_price ?? sub.price_after_trial ?? sub.price,
+    });
+
+    res.json({ success: true, message: 'Trial converted to paid subscription' });
+  } catch (error) {
+    logger.error('Trial convert error:', error);
+    res.status(500).json({ success: false, error: error instanceof Error ? error.message : 'Failed to convert trial' });
+  }
+});
+
+/**
+ * POST /api/subscriptions/:id/trial/cancel
+ * Cancel a trial before auto-charge. Counts toward "Saved by SYNCRO" metric.
+ */
+router.post('/:id/trial/cancel', validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const subId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const { acted_on_reminder_days } = req.body;
+
+    const db = (await import('../config/database')).supabase;
+
+    const { data: sub, error: fetchErr } = await db
+      .from('subscriptions')
+      .select('*')
+      .eq('id', subId)
+      .eq('user_id', req.user!.id)
+      .single();
+
+    if (fetchErr || !sub) {
+      return res.status(404).json({ success: false, error: 'Subscription not found' });
+    }
+
+    if (!sub.is_trial) {
+      return res.status(400).json({ success: false, error: 'Subscription is not a trial' });
+    }
+
+    // Cancel the subscription
+    await db.from('subscriptions').update({
+      status: 'cancelled',
+      cancelled_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }).eq('id', subId);
+
+    // Log cancellation — saved_by_syncro = true when credit card was on file
+    await db.from('trial_conversion_events').insert({
+      subscription_id: subId,
+      user_id: req.user!.id,
+      outcome: 'cancelled',
+      conversion_type: 'intentional',
+      saved_by_syncro: sub.credit_card_required === true,
+      acted_on_reminder_days: acted_on_reminder_days ?? null,
+    });
+
+    res.json({ success: true, message: 'Trial cancelled successfully' });
+  } catch (error) {
+    logger.error('Trial cancel error:', error);
+    res.status(500).json({ success: false, error: error instanceof Error ? error.message : 'Failed to cancel trial' });
+  }
+});
+
+/**
+ * GET /api/subscriptions/trials/saved-metric
+ * Returns the "Saved by SYNCRO" count — trials cancelled before auto-charge.
+ */
+router.get('/trials/saved-metric', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const db = (await import('../config/database')).supabase;
+
+    const { count, error } = await db
+      .from('trial_conversion_events')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', req.user!.id)
+      .eq('saved_by_syncro', true);
+
+    if (error) throw error;
+
+    res.json({ success: true, savedCount: count ?? 0 });
+  } catch (error) {
+    logger.error('Saved metric error:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch saved metric' });
+  }
+});
+
+/**
+ * POST /api/subscriptions/:id/cancel
+ * Cancel subscription with blockchain sync
  * @openapi
  * /api/subscriptions/{id}/cancel:
  *   post:
@@ -669,12 +852,159 @@ export function generateMnemonic(): string {
   return bip39.generateMnemonic(128);
  * Validates a given mnemonic phrase (must be 12 words).
  */
+router.get("/:id", validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const subscription = await subscriptionService.getSubscription(
+      req.user!.id,
+      req.params.id,
+    );
+
+    res.json({
+      success: true,
+      data: subscription,
+    });
+  } catch (error) {
+    logger.error("Get subscription error:", error);
+router.post("/:id/cancel", validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
+    const idempotencyKey = req.headers["idempotency-key"] as string;
+    const requestHash = idempotencyService.hashRequest(req.body);
+    // Check idempotency if key provided
+    if (idempotencyKey) {
+      const idempotencyCheck = await idempotencyService.checkIdempotency(
+        idempotencyKey,
+        req.user!.id,
+        requestHash,
+      );
+      if (idempotencyCheck.isDuplicate && idempotencyCheck.cachedResponse) {
+        return res
+          .status(idempotencyCheck.cachedResponse.status)
+          .json(idempotencyCheck.cachedResponse.body);
+      }
+    }
+    const result = await subscriptionService.cancelSubscription(
+      Array.isArray(req.params.id) ? req.params.id[0] : req.params.id,
+    const responseBody = {
+      data: result.subscription,
+      blockchain: {
+        synced: result.syncStatus === "synced",
+        transactionHash: result.blockchainResult?.transactionHash,
+        error: result.blockchainResult?.error,
+      },
+    };
+    const statusCode = result.syncStatus === "failed" ? 207 : 200;
+    if (idempotencyKey) {
+      await idempotencyService.storeResponse(
+        idempotencyKey,
+        req.user!.id,
+        requestHash,
+        statusCode,
+        responseBody,
+      );
+    }
+    res.status(statusCode).json(responseBody);
+    logger.error("Cancel subscription error:", error);
+    const statusCode =
+      error instanceof Error && error.message.includes("not found")
+        ? 404
+        : 500;
+    res.status(statusCode).json({
+      success: false,
+      error:
+        error instanceof Error ? error.message : "Failed to get subscription",
+        error instanceof Error
+          ? error.message
+          : "Failed to cancel subscription",
+    });
 export function validateMnemonic(mnemonic: string): boolean {
   if (!mnemonic || typeof mnemonic !== 'string') {
     return false;
   }
 
 /**
+ * POST /api/subscriptions
+ * Create new subscription with idempotency support
+ */
+router.post("/", async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const idempotencyKey = req.headers["idempotency-key"] as string;
+    const requestHash = idempotencyService.hashRequest(req.body);
+
+    // Check idempotency if key provided
+    if (idempotencyKey) {
+      const idempotencyCheck = await idempotencyService.checkIdempotency(
+        idempotencyKey,
+        req.user!.id,
+        requestHash,
+      );
+
+      if (idempotencyCheck.isDuplicate && idempotencyCheck.cachedResponse) {
+        logger.info("Returning cached response for idempotent request", {
+          idempotencyKey,
+          userId: req.user!.id,
+        });
+
+        return res
+          .status(idempotencyCheck.cachedResponse.status)
+          .json(idempotencyCheck.cachedResponse.body);
+      }
+    }
+
+    // Validate input
+    const { name, price, billing_cycle } = req.body;
+    if (!name || price === undefined || !billing_cycle) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required fields: name, price, billing_cycle",
+      });
+    }
+
+    // Create subscription
+    const result = await subscriptionService.createSubscription(
+      req.user!.id,
+      req.body,
+      idempotencyKey,
+    );
+
+    const responseBody = {
+      success: true,
+      data: result.subscription,
+      blockchain: {
+        synced: result.syncStatus === "synced",
+        transactionHash: result.blockchainResult?.transactionHash,
+        error: result.blockchainResult?.error,
+      },
+    };
+
+    const statusCode = result.syncStatus === "failed" ? 207 : 201;
+
+    // Store idempotency record if key provided
+    if (idempotencyKey) {
+      await idempotencyService.storeResponse(
+        idempotencyKey,
+        req.user!.id,
+        requestHash,
+        statusCode,
+        responseBody,
+      );
+    }
+
+    res.status(statusCode).json(responseBody);
+  } catch (error) {
+    logger.error("Create subscription error:", error);
+    res.status(500).json({
+      success: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Failed to create subscription",
+ * POST /api/subscriptions/bulk
+ * Bulk operations (delete, update status, etc.)
+router.post("/bulk", validateBulkSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
+    const { operation, ids, data } = req.body;
+    if (!operation || !ids || !Array.isArray(ids)) {
+        error: "Missing required fields: operation, ids",
+    const results = [];
+    const errors = [];
  * @openapi
  * /api/subscriptions/bulk:
  *   post:
@@ -704,6 +1034,301 @@ export function validateMnemonic(mnemonic: string): boolean {
  *         description: Validation error
  *       401:
  *         description: Unauthorized
+    for (const id of ids) {
+      try {
+        let result;
+        switch (operation) {
+          case "delete":
+            result = await subscriptionService.cancelSubscription(req.user!.id, id);
+            result = await subscriptionService.deleteSubscription(req.user!.id, id);
+            break;
+          case "update":
+            if (!data) throw new Error("Update data required");
+            result = await subscriptionService.updateSubscription(req.user!.id, id, data);
+            break;
+          default:
+            throw new Error(`Unknown operation: ${operation}`);
+        }
+        results.push({ id, success: true, result });
+      } catch (error) {
+        errors.push({ id, error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+
+    res.json({
+      success: errors.length === 0,
+      results,
+      errors: errors.length > 0 ? errors : undefined,
+    });
+    logger.error("Bulk operation error:", error);
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to perform bulk operation",
+    });
+  const words = mnemonic.trim().split(/\s+/);
+  if (words.length !== 12) {
+    return false;
+  }
+
+/**
+ * PATCH /api/subscriptions/:id
+ * Update subscription with optimistic locking
+ */
+router.patch("/:id", validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const idempotencyKey = req.headers["idempotency-key"] as string;
+    const requestHash = idempotencyService.hashRequest(req.body);
+
+    // Check idempotency if key provided
+    if (idempotencyKey) {
+      const idempotencyCheck = await idempotencyService.checkIdempotency(
+        idempotencyKey,
+        req.user!.id,
+        requestHash,
+      );
+
+      if (idempotencyCheck.isDuplicate && idempotencyCheck.cachedResponse) {
+        return res
+          .status(idempotencyCheck.cachedResponse.status)
+          .json(idempotencyCheck.cachedResponse.body);
+      }
+    }
+
+    const expectedVersion = req.headers["if-match"] as string;
+
+    const result = await subscriptionService.updateSubscription(
+      req.user!.id,
+      Array.isArray(req.params.id) ? req.params.id[0] : req.params.id,
+      req.body,
+      expectedVersion ? parseInt(expectedVersion) : undefined,
+    );
+
+    const responseBody = {
+      success: true,
+      data: result.subscription,
+      blockchain: {
+        synced: result.syncStatus === "synced",
+        transactionHash: result.blockchainResult?.transactionHash,
+        error: result.blockchainResult?.error,
+      },
+    };
+
+    const statusCode = result.syncStatus === "failed" ? 207 : 200;
+
+    // Store idempotency record if key provided
+    if (idempotencyKey) {
+      await idempotencyService.storeResponse(
+        idempotencyKey,
+        req.user!.id,
+        requestHash,
+        statusCode,
+        responseBody,
+      );
+    }
+
+    res.status(statusCode).json(responseBody);
+  } catch (error) {
+    logger.error("Update subscription error:", error);
+    const statusCode =
+      error instanceof Error && error.message.includes("not found")
+        ? 404
+        : 500;
+    res.status(statusCode).json({
+      success: false,
+      error:
+        error instanceof Error ? error.message : "Failed to update subscription",
+    });
+  }
+});
+
+/**
+ * DELETE /api/subscriptions/:id
+ * Delete subscription
+ */
+router.delete("/:id", validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const result = await subscriptionService.deleteSubscription(
+      req.user!.id,
+      req.params.id,
+    );
+
+    const responseBody = {
+      success: true,
+      message: "Subscription deleted",
+      blockchain: {
+        synced: result.syncStatus === "synced",
+        transactionHash: result.blockchainResult?.transactionHash,
+        error: result.blockchainResult?.error,
+      },
+    };
+
+    const statusCode = result.syncStatus === "failed" ? 207 : 200;
+
+    res.status(statusCode).json(responseBody);
+  } catch (error) {
+    logger.error("Delete subscription error:", error);
+    const statusCode =
+      error instanceof Error && error.message.includes("not found")
+        ? 404
+        : 500;
+    res.status(statusCode).json({
+      success: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Failed to delete subscription",
+    });
+  }
+});
+
+/**
+ * POST /api/subscriptions/:id/attach-gift-card
+ * Attach gift card info to a subscription
+ */
+router.post('/:id/attach-gift-card', validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const subscriptionId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    if (!subscriptionId) {
+      return res.status(400).json({ success: false, error: 'Subscription ID required' });
+    }
+    const { giftCardHash, provider } = req.body;
+
+    if (!giftCardHash || !provider) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: giftCardHash, provider',
+      });
+    }
+
+    const result = await giftCardService.attachGiftCard(
+      req.user!.id,
+      subscriptionId,
+      giftCardHash,
+      provider
+    );
+
+    if (!result.success) {
+      const statusCode = result.error?.includes('not found') || result.error?.includes('access denied') ? 404 : 400;
+      return res.status(statusCode).json({
+        success: false,
+        error: result.error,
+      });
+    }
+
+    res.status(201).json({
+      success: true,
+      data: result.data,
+      blockchain: {
+        transactionHash: result.blockchainResult?.transactionHash,
+        error: result.blockchainResult?.error,
+      },
+    });
+  } catch (error) {
+    logger.error('Attach gift card error:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to attach gift card',
+    });
+  }
+});
+
+/**
+ * POST /api/subscriptions/:id/retry-sync
+ * Retry blockchain sync for a subscription
+ */
+router.post("/:id/retry-sync", validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const result = await subscriptionService.retryBlockchainSync(
+      req.user!.id,
+      req.params.id,
+    );
+
+    res.json({
+      success: result.success,
+      transactionHash: result.transactionHash,
+      error: result.error,
+    });
+  } catch (error) {
+    logger.error("Retry sync error:", error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to retry sync",
+    });
+  }
+});
+
+/**
+ * POST /api/subscriptions/:id/cancel
+ * Cancel subscription with blockchain sync
+ */
+router.post("/:id/cancel", validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const idempotencyKey = req.headers["idempotency-key"] as string;
+    const requestHash = idempotencyService.hashRequest(req.body);
+
+    // Check idempotency if key provided
+    if (idempotencyKey) {
+      const idempotencyCheck = await idempotencyService.checkIdempotency(
+        idempotencyKey,
+        req.user!.id,
+        requestHash,
+      );
+
+      if (idempotencyCheck.isDuplicate && idempotencyCheck.cachedResponse) {
+        return res
+          .status(idempotencyCheck.cachedResponse.status)
+          .json(idempotencyCheck.cachedResponse.body);
+      }
+    }
+
+    const result = await subscriptionService.cancelSubscription(
+      req.user!.id,
+      req.params.id,
+    );
+
+    const responseBody = {
+      success: true,
+      data: result.subscription,
+      blockchain: {
+        synced: result.syncStatus === "synced",
+        transactionHash: result.blockchainResult?.transactionHash,
+        error: result.blockchainResult?.error,
+      },
+    };
+
+    const statusCode = result.syncStatus === "failed" ? 207 : 200;
+
+    if (idempotencyKey) {
+      await idempotencyService.storeResponse(
+        idempotencyKey,
+        req.user!.id,
+        requestHash,
+        statusCode,
+        responseBody,
+      );
+    }
+
+    res.status(statusCode).json(responseBody);
+  } catch (error) {
+    logger.error("Cancel subscription error:", error);
+    const statusCode =
+      error instanceof Error && error.message.includes("not found")
+        ? 404
+        : 500;
+    res.status(statusCode).json({
+      success: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Failed to cancel subscription",
+    });
+  }
+});
+
+/**
+ * POST /api/subscriptions/bulk
+ * Bulk operations (delete, update status, etc.)
  */
 router.post("/bulk", validateBulkSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -754,6 +1379,8 @@ router.post("/bulk", validateBulkSubscriptionOwnership, async (req: Authenticate
   if (words.length !== 12) {
     return false;
   }
+});
 
+export default router;
   return bip39.validateMnemonic(words.join(' '));
 }

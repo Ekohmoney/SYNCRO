@@ -1,5 +1,7 @@
 "use client"
 
+import { useState, useEffect } from "react"
+import { Edit2, Trash2, Mail, Clock, Copy, ShieldAlert, CheckCircle, Lock, Users, Calendar, Check } from "lucide-react"
 import { useState, useEffect, useRef } from "react"
 import { Edit2, Trash2, Mail, Clock, Copy, Lock, Users, Calendar, Check, Download, FileText, Upload } from "lucide-react"
 import { exportAllCSV, exportActiveCSV, exportDateRangeCSV } from "@/lib/csv-export"
@@ -9,6 +11,7 @@ import CSVImportModal from "@/components/modals/csv-import-modal"
 import { useDebounce } from "@/hooks/use-debounce"
 import { VirtualizedList } from "@/components/ui/virtualized-list"
 import { EmptyState } from "@/components/ui/empty-state"
+import { ErrorBoundary } from "@/components/ui/error-boundary"
 import CancellationGuideModal from "@/components/modals/cancellation-guide-modal"
 import { fetchAllCancellationGuides, type CancellationGuide } from "@/lib/supabase/cancellation-guides"
 
@@ -460,24 +463,41 @@ export default function SubscriptionsPage({
               itemHeight={80}
               containerHeight={600}
               renderItem={(sub: any, index: number) => (
-                <SubscriptionCard
-                  key={sub.id}
-                  subscription={sub}
-                  onDelete={onDelete}
-                  onManage={onManage}
-                  selectedSubscriptions={selectedSubscriptions}
-                  onToggleSelect={onToggleSelect}
-                  darkMode={darkMode}
-                  isDuplicate={duplicates.some((dup: any) => dup.subscriptions.some((s: any) => s.id === sub.id))}
-                  unusedInfo={unusedSubscriptions.find((unused: any) => unused.id === sub.id)}
-                />
+                <ErrorBoundary 
+                  fallback={<BrokenCardPlaceholder name={sub?.name} darkMode={darkMode} />}
+                >
+                  <SubscriptionCard
+                    key={sub.id}
+                    subscription={sub}
+                    onDelete={onDelete}
+                    onManage={onManage}
+                    selectedSubscriptions={selectedSubscriptions}
+                    onToggleSelect={onToggleSelect}
+                    darkMode={darkMode}
+                    isDuplicate={duplicates.some((dup: any) => dup.subscriptions.some((s: any) => s.id === sub.id))}
+                    unusedInfo={unusedSubscriptions.find((unused: any) => unused.id === sub.id)}
+                  />
+                </ErrorBoundary>
               )}
             />
           ) : (
             <div className="space-y-3">
               {filtered.map((sub: any) => (
-                <SubscriptionCard
+                <ErrorBoundary 
                   key={sub.id}
+                  fallback={<BrokenCardPlaceholder name={sub?.name} darkMode={darkMode} />}
+                >
+                  <SubscriptionCard
+                    subscription={sub}
+                    onDelete={onDelete}
+                    onManage={onManage}
+                    selectedSubscriptions={selectedSubscriptions}
+                    onToggleSelect={onToggleSelect}
+                    darkMode={darkMode}
+                    isDuplicate={duplicates.some((dup: any) => dup.subscriptions.some((s: any) => s.id === sub.id))}
+                    unusedInfo={unusedSubscriptions.find((unused: any) => unused.id === sub.id)}
+                  />
+                </ErrorBoundary>
                   subscription={sub}
                   onDelete={onDelete}
                   onManage={onManage}
@@ -669,6 +689,15 @@ export function SubscriptionCard({
                 Unused {unusedInfo.daysSinceLastUse}d
               </span>
             )}
+            {sub.latest_price_change && (
+              <span className={`text-xs px-2 py-0.5 rounded-full font-semibold flex items-center gap-1 ${
+                sub.latest_price_change.new_price > sub.latest_price_change.old_price 
+                  ? "bg-red-100 text-red-700" 
+                  : "bg-green-100 text-green-700"
+              }`}>
+                {sub.latest_price_change.new_price > sub.latest_price_change.old_price ? "↑" : "↓"} Price Changed
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <p className={`text-xs ${darkMode ? "text-gray-400" : "text-gray-500"}`}>{sub.category}</p>
@@ -736,31 +765,6 @@ export function SubscriptionCard({
           <p className={`text-xs ${darkMode ? "text-gray-400" : "text-gray-500"}`}>/Month</p>
         </div>
 
-        <div className="flex items-center gap-4">
-          <div className="flex flex-col items-end gap-1">
-            <button
-              onClick={() => onManage && onManage({ ...sub, toggleVisibility: true })}
-              className={`flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-md transition-colors ${
-                sub.visibility === 'team'
-                  ? "bg-blue-100 text-blue-700 hover:bg-blue-200"
-                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-              }`}
-              title={sub.visibility === 'team' ? "Visible to Team" : "Private"}
-            >
-              {sub.visibility === 'team' ? <Users className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
-              {sub.visibility === 'team' ? "Team" : "Private"}
-            </button>
-          </div>
-
-          <div className="text-right min-w-32">
-            <p className={`text-sm ${darkMode ? "text-gray-400" : "text-gray-600"}`}>
-              {sub.status === "expiring" ? `Expires in ${sub.renewsIn} days` : `Renewal in ${sub.renewsIn} days`}
-            </p>
-            <span className={`text-xs font-semibold ${sub.status === "expiring" ? "text-[#E86A33]" : "text-[#007A5C]"}`}>
-              {sub.status === "expiring" ? "Expiring" : "Active"}
-            </span>
-          </div>
-        </div>
 
         <div className="flex gap-2" role="group" aria-label={`Actions for ${sub.name}`}>
           <button
@@ -788,6 +792,31 @@ export function SubscriptionCard({
             <Trash2 aria-hidden="true" className="w-4 h-4" />
           </button>
         </div>
+      </div>
+    </div>
+  )
+}
+
+function BrokenCardPlaceholder({ name, darkMode }: { name?: string; darkMode?: boolean }) {
+  return (
+    <div
+      className={`${darkMode ? "bg-[#2D3748] border-[#374151]" : "bg-white border-gray-200"} border rounded-xl p-5 flex items-center justify-between opacity-70`}
+    >
+      <div className="flex items-center gap-4 flex-1">
+        <div className={`w-12 h-12 ${darkMode ? "bg-[#1E2A35]" : "bg-gray-100"} rounded-lg flex items-center justify-center`}>
+          <AlertCircle className="w-6 h-6 text-destructive" />
+        </div>
+        <div>
+          <h4 className={`font-semibold ${darkMode ? "text-white" : "text-gray-900"}`}>
+            {name || "Subscription"} (Error)
+          </h4>
+          <p className={`text-xs ${darkMode ? "text-gray-400" : "text-gray-500"}`}>
+            This component failed to load.
+          </p>
+        </div>
+      </div>
+      <div className="text-right">
+        <p className={`text-xs ${darkMode ? "text-gray-400" : "text-gray-500"}`}>Unavailable</p>
       </div>
     </div>
   )
