@@ -167,33 +167,13 @@ app.post('/api/reminders/retry', createAdminLimiter(), adminAuth, async (req, re
     });
   }
 });
+import * as bip39 from 'bip39';
 
 /**
- * POST /api/reminders/snooze-cleanup
- * Manually trigger expired snooze cleanup — auto-unmutes subscriptions
- * whose muted_until date has passed. Called by cron or admin.
+ * Generates a standard BIP39 12-word mnemonic phrase.
  */
-app.post('/api/reminders/snooze-cleanup', adminAuth, async (req, res) => {
-  try {
-    await notificationPreferenceService.processExpiredSnoozes();
-    res.json({ success: true, message: 'Expired snoozes cleaned up' });
-  } catch (error) {
-    logger.error('Error processing expired snoozes:', error);
-    res.status(500).json({
-      success: false,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-});
-
-// Protocol Health Monitor: record metrics snapshot periodically (historical storage)
-const HEALTH_SNAPSHOT_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
-function startHealthSnapshotInterval() {
-  setInterval(() => {
-    healthService.recordSnapshot().catch(() => {});
-  }, HEALTH_SNAPSHOT_INTERVAL_MS);
-  // Record one snapshot shortly after startup
-  setTimeout(() => healthService.recordSnapshot().catch(() => {}), 5000);
+export function generateMnemonic(): string {
+  return bip39.generateMnemonic(128);
 }
 
 app.post('/api/admin/expiry/process', createAdminLimiter(), adminAuth, async (req, res) => {
@@ -228,10 +208,18 @@ const server = app.listen(PORT, async () => {
     logger.info('Rate limiting initialized successfully');
   } catch (error) {
     logger.warn('Rate limiting initialization failed, using memory store:', error);
+/**
+ * Validates a 12-word BIP39 mnemonic phrase.
+ */
+export function validateMnemonic(mnemonic: string): boolean {
+  if (!mnemonic || typeof mnemonic !== 'string') {
+    return false;
   }
 
-  // Start scheduler
-  schedulerService.start();
+  const words = mnemonic.trim().split(/\s+/);
+  if (words.length !== 12) {
+    return false;
+  }
 
   // Start health metrics snapshot loop
   startHealthSnapshotInterval();
@@ -270,3 +258,5 @@ process.on('SIGINT', () => {
     process.exit(0);
   });
 });
+  return bip39.validateMnemonic(words.join(' '));
+}
