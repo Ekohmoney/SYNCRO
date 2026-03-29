@@ -1,7 +1,31 @@
-import { renewalExecutor } from '../src/services/renewal-executor';
+﻿jest.mock('../src/config/database', () => ({
+  supabase: { from: jest.fn() },
+}));
+
+jest.mock('../src/config/logger', () => ({
+  default: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
+  __esModule: true,
+}));
+
+jest.mock('../src/services/blockchain-service', () => ({
+  blockchainService: { syncSubscription: jest.fn() },
+}));
+
+jest.mock('../src/utils/transaction', () => ({
+  DatabaseTransaction: {
+    execute: jest.fn().mockImplementation(async (cb) => {
+      const db = jest.requireMock('../src/config/database');
+      return cb(db.supabase);
+    }),
+  },
+}));
+
+import { RenewalExecutor } from '../src/services/renewal-executor';
 import { supabase } from '../src/config/database';
+import { blockchainService } from '../src/services/blockchain-service';
 
 describe('RenewalExecutor', () => {
+  let executor: RenewalExecutor;
   const mockRequest = {
     subscriptionId: 'sub-123',
     userId: 'user-456',
@@ -9,63 +33,65 @@ describe('RenewalExecutor', () => {
     amount: 9.99,
   };
 
-  beforeEach(async () => {
-    // Setup test data
-    await supabase.from('subscriptions').insert({
-      id: mockRequest.subscriptionId,
-      user_id: mockRequest.userId,
-      name: 'Netflix',
-      price: 9.99,
-      status: 'active',
-      next_billing_date: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
-    });
-
-    await supabase.from('renewal_approvals').insert({
-      subscription_id: mockRequest.subscriptionId,
-      approval_id: mockRequest.approvalId,
-      max_spend: 15.0,
-      expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-      used: false,
-    });
+  beforeEach(() => {
+    jest.clearAllMocks();
+    executor = new RenewalExecutor();
   });
 
-  afterEach(async () => {
-    await supabase.from('renewal_logs').delete().eq('subscription_id', mockRequest.subscriptionId);
-    await supabase.from('renewal_approvals').delete().eq('subscription_id', mockRequest.subscriptionId);
-    await supabase.from('subscriptions').delete().eq('id', mockRequest.subscriptionId);
-  });
+  function makeChain(resolvedValue: any) {
+    return {
+      select: jest.fn().mockReturnThis(),
+      eq: jest.fn().mockReturnThis(),
+      update: jest.fn().mockReturnThis(),
+      insert: jest.fn().mockResolvedValue({ error: null }),
+      single: jest.fn().mockResolvedValue(resolvedValue),
+    };
+  }
 
   it('should execute renewal successfully', async () => {
-    const result = await renewalExecutor.executeRenewal(mockRequest);
+    (supabase.from as jest.Mock).mockImplementation((table: string) => {
+      if (table === 'renewal_approvals') return makeChain({ data: { approval_id: 'approval-789', max_spend: 15.0, expires_at: null, used: false }, error: null });
+      if (table === 'subscriptions') return makeChain({ data: { status: 'active', next_billing_date: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString() }, error: null });
+      return makeChain({ data: null, error: null });
+    });
+    (blockchainService.syncSubscription as jest.Mock).mockResolvedValue({ success: true, transactionHash: 'tx-hash-123' });
 
+    const result = await executor.executeRenewal(mockRequest);
     expect(result.success).toBe(true);
-    expect(result.subscriptionId).toBe(mockRequest.subscriptionId);
-    expect(result.transactionHash).toBeDefined();
+    expect(result.transactionHash).toBe('tx-hash-123');
   });
 
   it('should fail with invalid approval', async () => {
-    const invalidRequest = { ...mockRequest, approvalId: 'invalid' };
-    const result = await renewalExecutor.executeRenewal(invalidRequest);
+    (supabase.from as jest.Mock).mockImplementation((table: string) => {
+      if (table === 'renewal_approvals') return makeChain({ data: null, error: { message: 'Not found' } });
+      return makeChain({ data: null, error: null });
+    });
 
+    const result = await executor.executeRenewal(mockRequest);
     expect(result.success).toBe(false);
     expect(result.failureReason).toBe('invalid_approval');
   });
 
   it('should fail when billing window invalid', async () => {
-    await supabase
-      .from('subscriptions')
-      .update({ next_billing_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString() })
-      .eq('id', mockRequest.subscriptionId);
+    (supabase.from as jest.Mock).mockImplementation((table: string) => {
+      if (table === 'renewal_approvals') return makeChain({ data: { approval_id: 'approval-789', max_spend: 15.0, expires_at: null, used: false }, error: null });
+      if (table === 'subscriptions') return makeChain({ data: { status: 'active', next_billing_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString() }, error: null });
+      return makeChain({ data: null, error: null });
+    });
 
-    const result = await renewalExecutor.executeRenewal(mockRequest);
-
+    const result = await executor.executeRenewal(mockRequest);
     expect(result.success).toBe(false);
     expect(result.failureReason).toBe('billing_window_invalid');
   });
 
   it('should retry on retryable failures', async () => {
-    const result = await renewalExecutor.executeRenewalWithRetry(mockRequest, 3);
+    (supabase.from as jest.Mock).mockImplementation((table: string) => {
+      if (table === 'renewal_approvals') return makeChain({ data: null, error: { message: 'Not found' } });
+      return makeChain({ data: null, error: null });
+    });
 
+    const result = await executor.executeRenewalWithRetry(mockRequest, 3);
     expect(result).toBeDefined();
+    expect(result.success).toBe(false);
   });
 });

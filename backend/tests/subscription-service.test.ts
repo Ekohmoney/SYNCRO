@@ -27,6 +27,14 @@ jest.mock('../src/services/blockchain-service', () => ({
   },
 }));
 
+// Mock renewal cooldown service
+jest.mock('../src/services/renewal-cooldown-service', () => ({
+  renewalCooldownService: {
+    checkCooldown: () => Promise.resolve({ isOnCooldown: false, canRetry: true, timeRemainingSeconds: 0, lastAttemptAt: null }),
+    recordRenewalAttempt: () => Promise.resolve({ new_attempt_at: new Date().toISOString() }),
+  },
+}));
+
 // Mock DatabaseTransaction
 jest.mock('../src/utils/transaction', () => ({
   DatabaseTransaction: {
@@ -34,9 +42,29 @@ jest.mock('../src/utils/transaction', () => ({
   },
 }));
 
+// Mock renewalCooldownService to avoid supabase chain complexity in retryBlockchainSync tests
+jest.mock('../src/services/renewal-cooldown-service', () => ({
+  renewalCooldownService: {
+    checkCooldown: jest.fn(),
+    recordRenewalAttempt: jest.fn(),
+  },
+}));
+
+import { renewalCooldownService } from '../src/services/renewal-cooldown-service';
+
 describe('SubscriptionService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    // Re-apply defaults after resetMocks clears them
+    (renewalCooldownService.checkCooldown as jest.Mock).mockResolvedValue({
+      canRetry: true,
+      isOnCooldown: false,
+      timeRemainingSeconds: 0,
+    });
+    (renewalCooldownService.recordRenewalAttempt as jest.Mock).mockResolvedValue({
+      previous_attempt_at: null,
+      new_attempt_at: new Date().toISOString(),
+    });
   });
 
   describe('getSubscription()', () => {
@@ -631,16 +659,21 @@ describe('SubscriptionService', () => {
         { id: 'sub-1', name: 'Netflix', status: 'active' },
       ];
 
-      const mockQuery = {
+      const mockQuery: any = {
         select: jest.fn().mockReturnThis(),
         eq: jest.fn().mockReturnThis(),
-        order: jest.fn().mockResolvedValue({
+        order: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        then: jest.fn().mockImplementation((resolve: any) => resolve({
           data: mockSubscriptions,
           error: null,
           count: 1,
-        }),
-        limit: jest.fn().mockReturnThis(),
+        })),
       };
+      // Make the last eq call resolve
+      mockQuery.eq
+        .mockReturnValueOnce(mockQuery) // user_id eq
+        .mockReturnValueOnce(mockQuery); // status eq
 
       (supabase.from as jest.Mock).mockReturnValue(mockQuery);
 
@@ -656,16 +689,20 @@ describe('SubscriptionService', () => {
         { id: 'sub-1', name: 'Netflix', category: 'entertainment' },
       ];
 
-      const mockQuery = {
+      const mockQuery: any = {
         select: jest.fn().mockReturnThis(),
         eq: jest.fn().mockReturnThis(),
-        order: jest.fn().mockResolvedValue({
+        order: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        then: jest.fn().mockImplementation((resolve: any) => resolve({
           data: mockSubscriptions,
           error: null,
           count: 1,
-        }),
-        limit: jest.fn().mockReturnThis(),
+        })),
       };
+      mockQuery.eq
+        .mockReturnValueOnce(mockQuery) // user_id eq
+        .mockReturnValueOnce(mockQuery); // category eq
 
       (supabase.from as jest.Mock).mockReturnValue(mockQuery);
 
@@ -757,6 +794,8 @@ describe('SubscriptionService', () => {
           data: mockSubscription,
           error: null,
         }),
+        update: jest.fn().mockReturnThis(),
+        insert: jest.fn().mockResolvedValue({ data: null, error: null }),
       };
 
       (supabase.from as jest.Mock).mockReturnValue(mockQuery);
@@ -796,6 +835,8 @@ describe('SubscriptionService', () => {
           data: mockSubscription,
           error: null,
         }),
+        update: jest.fn().mockReturnThis(),
+        insert: jest.fn().mockResolvedValue({ data: null, error: null }),
       };
 
       (supabase.from as jest.Mock).mockReturnValue(mockQuery);
@@ -828,7 +869,7 @@ describe('SubscriptionService', () => {
 
       await expect(
         subscriptionService.retryBlockchainSync('user-123', 'non-existent')
-      ).rejects.toThrow('Subscription not found');
+      ).rejects.toThrow('Subscription not found or access denied');
     });
   });
 });

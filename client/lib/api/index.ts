@@ -27,16 +27,15 @@ export * from './env'
 import { NextResponse, type NextRequest } from 'next/server'
 import { withErrorHandling, createSuccessResponse } from './errors'
 import { requireAuth, createRequestContext } from './auth'
-import { RateLimiters } from './rate-limit'
+import { type RequestContext, type ApiResponse } from './types'
 import { isMaintenanceMode } from './env'
 import { ApiErrors } from './errors'
-import { ApiResponse, RequestContext } from './types'
 
 type RouteHandler = (
   request: NextRequest,
   context: RequestContext,
   user?: Awaited<ReturnType<typeof requireAuth>>
-) => Promise<Response>
+) => Promise<NextResponse<ApiResponse>>
 
 type RouteOptions = {
   requireAuth?: boolean

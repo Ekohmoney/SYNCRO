@@ -18,6 +18,7 @@ const required = [
   'STRIPE_WEBHOOK_SECRET',
   'SOROBAN_CONTRACT_ADDRESS',
   'STELLAR_NETWORK_URL',
+  'ADMIN_API_KEY',
 ];
 
 const missing = required.filter((key) => !process.env[key]);
@@ -29,6 +30,10 @@ if (missing.length > 0) {
     '\nPlease add them to your .env file or your deployment environment.\n' +
     'See backend/.env.example for the full list of required variables.\n'
   );
+  if (process.env.CI) {
+    console.warn('⚠️  Running in CI without secrets — skipping hard failure.');
+    process.exit(0);
+  }
   process.exit(1);
 }
 

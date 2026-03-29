@@ -109,7 +109,7 @@ describe('RenewalCooldownService', () => {
         }),
       };
 
-      (supabase.from as jest.Mock).mockImplementation((table) => {
+      (supabase.from as jest.Mock).mockImplementation((table: string) => {
         if (table === 'subscriptions') return mockUpdateQuery;
         if (table === 'subscription_renewal_attempts') return mockInsertQuery;
         return {
@@ -156,7 +156,7 @@ describe('RenewalCooldownService', () => {
         }),
       };
 
-      (supabase.from as jest.Mock).mockImplementation((table) => {
+      (supabase.from as jest.Mock).mockImplementation((table: string) => {
         if (table === 'subscriptions') return mockUpdateQuery;
         if (table === 'subscription_renewal_attempts') return mockInsertQuery;
         return mockUpdateQuery;
@@ -201,7 +201,7 @@ describe('RenewalCooldownService', () => {
         }),
       };
 
-      (supabase.from as jest.Mock).mockImplementation((table) => {
+      (supabase.from as jest.Mock).mockImplementation((table: string) => {
         if (table === 'subscriptions') {
           return {
             select: mockSelectQuery.select,
@@ -329,7 +329,7 @@ describe('Cooldown Enforcement Integration Tests', () => {
         insert: jest.fn().mockResolvedValue({ data: null, error: null }),
       };
 
-      (supabase.from as jest.Mock).mockImplementation((table) => {
+      (supabase.from as jest.Mock).mockImplementation((table: string) => {
         if (table === 'subscriptions') return mockUpdateQuery;
         if (table === 'subscription_renewal_attempts') return mockInsertQuery;
         return mockUpdateQuery;
