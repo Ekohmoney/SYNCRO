@@ -4,13 +4,6 @@ import { reorgHandler } from './reorg-handler';
 import { generateCycleId } from '../utils/cycle-id';
 import { renewalCooldownService } from './renewal-cooldown-service';
 
-export const LIFECYCLE_COLUMN_MAP: Record<number, string> = {
-  1: 'blockchain_created_at',
-  2: 'blockchain_activated_at',
-  3: 'blockchain_last_renewed_at',
-  4: 'blockchain_canceled_at',
-};
-
 interface ContractEvent {
   type: string;
   ledger: number;
@@ -134,6 +127,8 @@ export class EventListener {
       ApprovalRejected: this.handleApprovalRejected.bind(this),
       ExecutorAssigned: this.handleExecutorAssigned.bind(this),
       ExecutorRemoved: this.handleExecutorRemoved.bind(this),
+      DuplicateRenewalRejected: this.handleDuplicateRenewalRejected.bind(this),
+      LifecycleTimestampUpdated: this.handleLifecycleTimestampUpdated.bind(this),
     };
 
     return handlers[eventType];
@@ -334,6 +329,8 @@ export class EventListener {
     };
   }
 
+  // Duplicate handlers removed below in favor of consolidated implementations later in the file
+
   private async saveEvents(events: ProcessedEvent[]) {
     const { error } = await supabase
       .from('contract_events')
@@ -383,6 +380,52 @@ export class EventListener {
   private sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
+
+  private async handleDuplicateRenewalRejected(event: ContractEvent): Promise<ProcessedEvent | null> {
+    const { sub_id, cycle_id } = event.value;
+    logger.warn('Duplicate renewal rejected', { sub_id, cycle_id, ledger: event.ledger });
+    return {
+      sub_id,
+      event_type: 'duplicate_renewal_rejected',
+      ledger: event.ledger,
+      tx_hash: event.txHash,
+      event_data: event.value,
+    };
+  }
+
+  private async handleLifecycleTimestampUpdated(event: ContractEvent): Promise<ProcessedEvent | null> {
+    const { sub_id, event_kind, timestamp } = event.value;
+    const column = LIFECYCLE_COLUMN_MAP[event_kind as number];
+
+    if (!column) {
+      logger.warn('Unknown lifecycle event_kind', { event_kind });
+      return null;
+    }
+
+    const { error } = await supabase
+      .from('subscriptions')
+      .update({ [column]: timestamp })
+      .eq('blockchain_sub_id', sub_id);
+
+    if (error) {
+      logger.error('Failed to update lifecycle timestamp', { error, sub_id, column });
+    }
+
+    return {
+      sub_id,
+      event_type: 'lifecycle_timestamp_updated',
+      ledger: event.ledger,
+      tx_hash: event.txHash,
+      event_data: event.value,
+    };
+  }
 }
+
+export const LIFECYCLE_COLUMN_MAP: Record<number, string> = {
+  1: 'blockchain_created_at',
+  2: 'blockchain_activated_at',
+  3: 'blockchain_last_renewed_at',
+  4: 'blockchain_canceled_at',
+};
 
 export const eventListener = new EventListener();
