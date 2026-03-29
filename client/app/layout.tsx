@@ -1,13 +1,15 @@
 import type React from "react";
 import type { Metadata } from "next";
+import { GeistSans } from "geist/font/sans";
+import { GeistMono } from "geist/font/mono";
 import { Geist, Geist_Mono } from "next/font/google";
 import { headers } from "next/headers";
 import "./globals.css";
 import { PWAProvider } from "../components/pwa-provider";
 import { NonceProvider } from "../components/providers/nonce-provider";
 
-const _geist = Geist({ subsets: ["latin"] });
-const _geistMono = Geist_Mono({ subsets: ["latin"] });
+const _geist = GeistSans;
+const _geistMono = GeistMono;
 
 export const metadata: Metadata = {
   title: "SYNCRO — Subscription Manager",
