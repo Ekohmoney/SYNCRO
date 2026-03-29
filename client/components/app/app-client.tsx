@@ -54,6 +54,7 @@ import { analyticsApi, AnalyticsSummary } from "@/lib/api/analytics";
 interface AppClientProps {
     initialSubscriptions: DBSubscription[];
     initialEmailAccounts: any[];
+    initialPayments: any[];
     initialPriceChanges?: any[];
     initialConsolidationSuggestions?: any[];
 }
@@ -61,6 +62,7 @@ interface AppClientProps {
 export function AppClient({
     initialSubscriptions,
     initialEmailAccounts,
+    initialPayments = [],
     initialPriceChanges = [],
     initialConsolidationSuggestions = [],
 }: AppClientProps) {
@@ -68,6 +70,7 @@ export function AppClient({
     const [analyticsSummary, setAnalyticsSummary] = useState<AnalyticsSummary | undefined>(undefined);
 
     // App state
+    const [payments, setPayments] = useState(initialPayments);
     const [mode, setMode] = useState<
         "welcome" | "individual" | "enterprise" | "enterprise-setup"
     >("welcome");
@@ -605,6 +608,31 @@ export function AppClient({
                                 darkMode={darkMode}
                                 currency={currency}
                                 onCurrencyChange={(c: Currency) => setCurrency(c)}
+                                payments={payments}
+                                onRefund={async (transactionId: string) => {
+                                    try {
+                                        const response = await fetch("/api/payments/refund", {
+                                            method: "POST",
+                                            headers: { "Content-Type": "application/json" },
+                                            body: JSON.stringify({ transactionId }),
+                                        });
+                                        if (response.ok) {
+                                            showToast({
+                                                title: "Refund requested",
+                                                description: "Your refund request has been submitted.",
+                                                variant: "success",
+                                            });
+                                        } else {
+                                            throw new Error("Refund failed");
+                                        }
+                                    } catch (error) {
+                                        showToast({
+                                            title: "Error",
+                                            description: "Failed to request refund. Please contact support.",
+                                            variant: "error",
+                                        });
+                                    }
+                                }}
                             />
                         )}
                     </>
