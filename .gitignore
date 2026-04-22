@@ -103,4 +103,3 @@ coverage/
 CLAUDE.md
 
 !backend/package-lock.json
-!client/package-lock.json
