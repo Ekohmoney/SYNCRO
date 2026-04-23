@@ -461,4 +461,19 @@ router.post('/check-duplicates', async (req: AuthenticatedRequest, res: Response
   }
 });
 
+// GET /api/subscriptions/auto-tag?name=<name>
+router.get('/auto-tag', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const name = req.query.name as string;
+    if (!name) {
+      return res.status(400).json({ success: false, error: 'name query parameter is required' });
+    }
+    const category = subscriptionService.autoTag(name);
+    return res.json({ success: true, category });
+  } catch (error) {
+    logger.error('auto-tag error:', error);
+    return res.status(500).json({ success: false, error: 'Failed to auto-tag subscription' });
+  }
+});
+
 export default router;
